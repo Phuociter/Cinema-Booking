@@ -27,6 +27,20 @@ Hệ thống hỗ trợ xem trailer, chọn suất chiếu, chọn ghế trực 
 
 ---
 
+## 📚 Hướng Dẫn Tài Liệu & Phân Chia Task Cho Team (5 Devs)
+
+Để các thành viên trong team làm việc độc lập, song song và không bị xung đột mã nguồn, vui lòng đọc tài liệu theo đúng thứ tự sau:
+
+### 1. Thứ tự đọc tài liệu (Reading Roadmap)
+
+| Thứ tự | Tài liệu | Mục tiêu & Nội dung |
+|:---:|---|---|
+| **Bước 1** | [docs/team_task_assignment_and_business_logic.md](docs/team_task_assignment_and_business_logic.md) | **Bắt buộc đọc đầu tiên**: Nắm sơ đồ luồng nghiệp vụ (Đặt vé, Thanh toán, Đăng ký/Đăng nhập) và xem chi tiết nhiệm vụ của mình (Dev A, B, C, D, hay E). |
+| **Bước 2** | [data/movie_booking_schema.sql](data/movie_booking_schema.sql) | **Đối chiếu CSDL**: Tìm đến nhóm bảng phụ trách (Group 1 đến Group 5) để nắm rõ tên bảng, cột, khóa ngoại và quy tắc Soft Delete / Status. |
+| **Bước 3** | [docs/aspnet_project_structure_setup.md](docs/aspnet_project_structure_setup.md) | **Cẩm nang code & tra cứu**: Tham khảo code mẫu C# của 22 Entities, DbContext Fluent API, cách dùng `DateTime.UtcNow`, JWT và xử lý ngoại lệ Middleware. |
+| **Bước 4** | [docs/aspnet_backend_business_flow.md](docs/aspnet_backend_business_flow.md) | **Tài liệu nâng cao (Tùy chọn)**: Dành cho Dev C/D muốn tìm hiểu sâu về cơ chế giữ ghế bằng Redis và background job Hangfire. |
+
+
 ## 🐳 Hướng dẫn cài đặt & chạy Cơ sở dữ liệu (PostgreSQL qua Docker)
 
 ### 1. Cấu hình biến môi trường
