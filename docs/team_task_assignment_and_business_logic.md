@@ -11,27 +11,29 @@ Tài liệu này cung cấp hướng dẫn chi tiết về cấu trúc 3-Layer (
 Luồng nghiệp vụ quan trọng nhất của hệ thống, bảo toàn tính nhất quán qua Database Transaction:
 
 ```text
-[Khách Hàng (FE)]          [BookingsController]            [BookingService]               [PostgreSQL DB]
-       │                             │                             │                             │
-       │  1. POST /api/bookings      │                             │                             │
-       ├────────────────────────────>│                             │                             │
-       │                             │  2. Validate input          │                             │
-       │                             │  3. CreateBookingAsync(...) │                             │
-       │                             ├────────────────────────────>│                             │
-       │                             │                             │  4. Bắt đầu Transaction     │
-       │                             │                             ├────────────────────────────>│
-       │                             │                             │                             │
-       │                             │                             │  5. Check ghế available     │
-       │                             │                             │  6. INSERT Bookings         │
-       │                             │                             │  7. INSERT Tickets          │
-       │                             │                             │  8. UPDATE Seats='reserved' │
-       │                             │                             │  9. INSERT BookingSnacks    │
-       │                             │                             │  10. INSERT Payments        │
-       │                             │                             │  11. COMMIT Transaction     │
-       │                             │                             │<────────────────────────────┤
-       │                             │  12. BookingResponse + Url  │                             │
-       │  13. 200 OK + Thông tin vé  │<────────────────────────────┤                             │
-       │<────────────────────────────┤                             │                             │
+┌────────────────────────────────────────────────────────────┐
+│          1.1 LUỒNG NGHIỆP VỤ ĐẶT VÉ (BOOKING FLOW)         │
+└────────────────────────────────────────────────────────────┘
+
+[1] Khách hàng gửi yêu cầu đặt vé:
+    Client ──( POST /api/bookings )──► BookingsController
+
+[2] Controller validate & chuyển tiếp:
+    BookingsController ──( CreateBookingAsync )──► BookingService
+
+[3] Service thực thi Transaction trong PostgreSQL:
+    BookingService ──( Begin Transaction )──► PostgreSQL
+    ├── 1. Kiểm tra ghế trống (status == 'available')
+    ├── 2. INSERT Bookings (status = 'pending')
+    ├── 3. INSERT Tickets (sinh vé từng ghế)
+    ├── 4. UPDATE ShowtimeSeats (status = 'reserved')
+    ├── 5. INSERT BookingSnacks (nếu có bắp nước)
+    ├── 6. INSERT Payments (status = 'pending')
+    └── 7. COMMIT Transaction
+
+[4] Phản hồi kết quả:
+    BookingService ──► BookingsController ──► Client
+    └── Trả về: 200 OK (BookingResponseDto + PaymentUrl)
 ```
 
 ---
@@ -39,21 +41,30 @@ Luồng nghiệp vụ quan trọng nhất của hệ thống, bảo toàn tính 
 ### 1.2 Luồng Thanh Toán & Xử Lý Webhook / Callback
 
 ```text
-[Khách Hàng]              [Cổng Thanh Toán (VNPay)]       [PaymentsController]         [PaymentService]             [PostgreSQL DB]
-     │                                │                            │                          │                            │
-     │  1. Thanh toán trên cổng       │                            │                          │                            │
-     ├───────────────────────────────>│                            │                          │                            │
-     │                                │  2. POST /payments/callback│                          │                            │
-     │                                ├───────────────────────────>│                          │                            │
-     │                                │                            │  3. ProcessCallback(...) │                            │
-     │                                │                            ├─────────────────────────>│                            │
-     │                                │                            │                          │  4. Verify chữ ký HMAC     │
-     │                                │                            │                          │  5. UPDATE Payments        │
-     │                                │                            │                          │  6. UPDATE Bookings        │
-     │                                │                            │                          │  7. Sinh QR Code vé        │
-     │                                │                            │                          ├───────────────────────────>│
-     │                                │  8. 200 OK Xác nhận        │                          │                            │
-     │                                │<───────────────────────────┤                          │                            │
+┌────────────────────────────────────────────────────────────┐
+│     1.2 LUỒNG THANH TOÁN & WEBHOOK (PAYMENT CALLBACK)      │
+└────────────────────────────────────────────────────────────┘
+
+[1] Khách hàng thanh toán qua cổng:
+    Client ──( Thanh toán online )──► Cổng Thanh Toán (VNPay/MoMo)
+
+[2] Cổng thanh toán gọi Webhook về Backend:
+    Cổng Thanh Toán ──( POST /payments/callback )──► PaymentsController
+
+[3] Service xác thực chữ ký & cập nhật DB:
+    PaymentsController ──( ProcessCallback )──► PaymentService
+    PaymentService ──( Verify HMAC )──► Kiểm tra chữ ký số
+    ├── NẾU THÀNH CÔNG:
+    │   ├── UPDATE Payments (status = 'success', paid_at = now)
+    │   ├── UPDATE Bookings (status = 'success')
+    │   └── Sinh QR Code cho từng Ticket
+    └── NẾU THẤT BẠI:
+        ├── UPDATE Payments (status = 'failed')
+        ├── UPDATE Bookings (status = 'cancelled')
+        └── Rollback ghế: ShowtimeSeats (status = 'available')
+
+[4] Xác nhận với cổng thanh toán:
+    PaymentService ──► PaymentsController ──► Cổng Thanh Toán (200 OK)
 ```
 
 ---
@@ -63,37 +74,50 @@ Luồng nghiệp vụ quan trọng nhất của hệ thống, bảo toàn tính 
 #### A. Luồng Đăng Ký Tài Khoản (Registration)
 
 ```text
-[Frontend Client]                 [AuthController]                 [AuthService]                [PostgreSQL DB]
-        │                                 │                              │                             │
-        │  1. POST /api/auth/register     │                              │                             │
-        ├────────────────────────────────>│  2. RegisterAsync(request)   │                             │
-        │                                 ├─────────────────────────────>│  3. Check Email tồn tại     │
-        │                                 │                              ├────────────────────────────>│
-        │                                 │                              │<────────────────────────────┤
-        │                                 │                              │  4. Hash Password (PBKDF2)  │
-        │                                 │                              │  5. INSERT User & Role      │
-        │                                 │                              ├────────────────────────────>│
-        │                                 │  6. Trả về UserDto           │                             │
-        │  7. 200 OK ("Đăng ký xong")     │<─────────────────────────────┤                             │
-        │<────────────────────────────────┤                              │                             │
+┌────────────────────────────────────────────────────────────┐
+│              1.3A LUỒNG ĐĂNG KÝ (REGISTRATION)             │
+└────────────────────────────────────────────────────────────┘
+
+Client ──( POST /api/auth/register )──► AuthController
+                                               │
+                                      AuthService
+                                               │
+         ┌─────────────────────────────────────┴─────────────────────────────────────┐
+         ▼                                                                           ▼
+ [Kiểm tra Email]                                                            [Hash Mật Khẩu]
+ Query PostgreSQL                                                             PasswordHasher
+ (WHERE deleted_at IS NULL)                                                  (Thuật toán PBKDF2)
+         │                                                                           │
+         └─────────────────────────────────────┬─────────────────────────────────────┘
+                                               ▼
+                                      [Lưu Vào Database]
+                                       INSERT INTO Users
+                                      & UserRoles (Role: Customer)
+                                               │
+Client ◄──( 200 OK: Đăng ký thành công )───────┘
 ```
 
 #### B. Luồng Đăng Nhập & Cấp JWT Token (Login)
 
 ```text
-[Frontend Client]                 [AuthController]                 [AuthService]                [PostgreSQL DB]
-        │                                 │                              │                             │
-        │  1. POST /api/auth/login        │                              │                             │
-        ├────────────────────────────────>│  2. LoginAsync(request)      │                             │
-        │                                 ├─────────────────────────────>│  3. Query User theo Email   │
-        │                                 │                              ├────────────────────────────>│
-        │                                 │                              │<────────────────────────────┤
-        │                                 │                              │  4. Verify Hash Password    │
-        │                                 │                              │  5. Sinh chuỗi JWT Token    │
-        │                                 │                              │     (UserId, Email, Roles)  │
-        │                                 │  6. AuthResponse             │                             │
-        │  7. 200 OK (Token + UserDto)    │<─────────────────────────────┤                             │
-        │<────────────────────────────────┤                              │                             │
+┌────────────────────────────────────────────────────────────┐
+│           1.3B LUỒNG ĐĂNG NHẬP & CẤP TOKEN (LOGIN)         │
+└────────────────────────────────────────────────────────────┘
+
+Client ──( POST /api/auth/login )──► AuthController ──► AuthService
+                                                               │
+         ┌─────────────────────────────────────────────────────┤
+         ▼                                                     ▼
+  [1. Tìm User]                                         [2. Kiểm Tra Hash]
+  Query PostgreSQL theo Email                            VerifyHashedPassword
+         │                                                     │
+         └──────────────────────────┬──────────────────────────┘
+                                    ▼
+                           [Mật Khẩu Chính Xác]
+                           Sinh chuỗi JWT Token
+                           Claims: UserId, Email, Roles
+                                    │
+Client ◄──( 200 OK: Token + UserDto )───┘
 ```
 
 ---
