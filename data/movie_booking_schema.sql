@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "btree_gist";
 
 -- ============================================================
--- GROUP 1 (Dev A): MOVIE CONTENT
+-- GROUP 1 (Dev A): MOVIE CONTENT & ACTORS
 -- ============================================================
 
 CREATE TABLE Movies (
@@ -62,10 +62,6 @@ CREATE TABLE MovieDirectors (
     PRIMARY KEY (movie_id, director_id)
 );
 
--- ============================================================
--- GROUP 2 (Dev B): ACTORS & CINEMA
--- ============================================================
-
 CREATE TABLE Actors (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(150) NOT NULL,
@@ -78,6 +74,10 @@ CREATE TABLE MovieActors (
     character_name  VARCHAR(150),
     PRIMARY KEY (movie_id, actor_id)
 );
+
+-- ============================================================
+-- GROUP 2 (Dev B): CINEMA, AUDITORIUMS & PHYSICAL SEATS
+-- ============================================================
 
 CREATE TABLE Cinemas (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -102,27 +102,6 @@ CREATE TABLE Auditoriums (
     deleted_at      TIMESTAMPTZ DEFAULT NULL
 );
 
--- ============================================================
--- GROUP 3 (Dev C): SHOWTIME & SEATS
--- ============================================================
-
-CREATE TABLE Showtimes (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    movie_id        UUID NOT NULL REFERENCES Movies(id) ON DELETE RESTRICT,
-    auditorium_id   UUID NOT NULL REFERENCES Auditoriums(id) ON DELETE RESTRICT,
-    start_time      TIMESTAMPTZ NOT NULL,
-    end_time        TIMESTAMPTZ NOT NULL,
-    base_price      NUMERIC(10,2) NOT NULL CHECK (base_price >= 0),
-    status          VARCHAR(20) NOT NULL DEFAULT 'scheduled', -- scheduled, cancelled, completed
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (end_time > start_time),
-    CONSTRAINT no_overlapping_showtimes
-        EXCLUDE USING gist (
-            auditorium_id WITH =,
-            tstzrange(start_time, end_time) WITH &&
-        )
-);
-
 CREATE TABLE SeatTypes (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(50) NOT NULL,
@@ -140,6 +119,27 @@ CREATE TABLE Seats (
     seat_code       VARCHAR(10) NOT NULL,
     UNIQUE (auditorium_id, seat_code),
     UNIQUE (auditorium_id, row_label, column_number)
+);
+
+-- ============================================================
+-- GROUP 3 (Dev C): SHOWTIMES & DYNAMIC SEAT AVAILABILITY
+-- ============================================================
+
+CREATE TABLE Showtimes (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    movie_id        UUID NOT NULL REFERENCES Movies(id) ON DELETE RESTRICT,
+    auditorium_id   UUID NOT NULL REFERENCES Auditoriums(id) ON DELETE RESTRICT,
+    start_time      TIMESTAMPTZ NOT NULL,
+    end_time        TIMESTAMPTZ NOT NULL,
+    base_price      NUMERIC(10,2) NOT NULL CHECK (base_price >= 0),
+    status          VARCHAR(20) NOT NULL DEFAULT 'scheduled', -- scheduled, cancelled, completed
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (end_time > start_time),
+    CONSTRAINT no_overlapping_showtimes
+        EXCLUDE USING gist (
+            auditorium_id WITH =,
+            tstzrange(start_time, end_time) WITH &&
+        )
 );
 
 CREATE TABLE ShowtimeSeats (

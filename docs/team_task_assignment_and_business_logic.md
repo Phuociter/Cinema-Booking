@@ -157,9 +157,9 @@ Client ◄──( 200 OK: Token + UserDto )───┘
 
 | Dev | Module Phụ Trách | Entities Sở Hữu | File Cần Code |
 |---|---|---|---|
-| **Dev A** | Quản lý Phim & Thể loại | `Movie`, `Genre`, `MovieGenre`, `Director`, `MovieDirector` | `IMovieService.cs`, `MovieService.cs`, `MoviesController.cs` |
-| **Dev B** | Rạp, Phòng chiếu & Diễn viên | `Actor`, `MovieActor`, `Cinema`, `Auditorium` | `ICinemaService.cs`, `CinemaService.cs`, `CinemasController.cs` |
-| **Dev C** | Lịch chiếu & Sơ đồ Ghế | `Showtime`, `SeatType`, `Seat`, `ShowtimeSeat` | `IScheduleService.cs`, `ScheduleService.cs`, `ShowtimesController.cs` |
+| **Dev A** | Quản lý Phim & Nghệ thuật | `Movie`, `Genre`, `MovieGenre`, `Director`, `MovieDirector`, `Actor`, `MovieActor` | `IMovieService.cs`, `MovieService.cs`, `MoviesController.cs` |
+| **Dev B** | Cụm rạp, Phòng chiếu & Ghế | `Cinema`, `Auditorium`, `SeatType`, `Seat` | `ICinemaService.cs`, `CinemaService.cs`, `CinemasController.cs` |
+| **Dev C** | Lịch chiếu & Ghế suất chiếu | `Showtime`, `ShowtimeSeat` | `IScheduleService.cs`, `ScheduleService.cs`, `ShowtimesController.cs` |
 | **Dev D** | Đặt vé & Bắp nước | `Booking`, `Ticket`, `Snack`, `CinemaSnack`, `BookingSnack` | `IBookingService.cs`, `BookingService.cs`, `BookingsController.cs` |
 | **Dev E** | Xác thực & Thanh toán | `User`, `Role`, `UserRole`, `Payment` | `IAuthService.cs`, `IPaymentService.cs`, `AuthController.cs`, `PaymentsController.cs` |
 
@@ -267,7 +267,7 @@ public class MoviesController : ControllerBase
   - `ClaimTypes.NameIdentifier` (`user.Id`)
   - `ClaimTypes.Email` (`user.Email`)
   - `ClaimTypes.Role` (`Roles` của user)
-- `ProcessPaymentCallbackAsync(PaymentCallbackRequest request)`: Cập nhật trạng thái giao dịch thanh toán và đơn hàng.
+- *Công cụ & Tài khoản Test MoMo Sandbox:* Tải ứng dụng tại [MoMo Developers](https://developers.momo.vn/v3/download/) (SĐT: `0968143221` | OTP: `000000` | Pass: `000000`).
 
 #### 2. Controller: `MovieBooking.API/Controllers/AuthController.cs` & `PaymentsController.cs`
 - `POST /api/auth/register` (Public)
