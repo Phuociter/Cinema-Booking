@@ -29,16 +29,16 @@ cinema2/Frontend/src/api/
 
 Mỗi Dev chỉ được phép viết code và bảo trì file API thuộc phân hệ của mình, triệt tiêu hoàn toàn rủi ro xung đột mã nguồn (Git Conflict):
 
-| File API Module | Người Sở Hữu | Các Hàm Chức Năng Cốt Lõi | Backend Controller Tương Ứng |
-|---|:---:|---|---|
-| **`useMovies.js`** | **Dev A** | `getAllMovies`, `getMovieById`, `createMovie`, `updateMovie`, `deleteMovie`, `getGenres`, `getDirectors`, `getActors`, `getTopMoviesReport` | `MoviesController`, `GenresController`, `ReportsController` |
-| **`useCinemas.js`** | **Dev B** | `getAllCinemas`, `getCinemaById`, `createCinema`, `updateCinema`, `deleteCinema`, `getAuditoriumSeats`, `createAuditorium`, `getSeatTypes`, `getOccupancyReport` | `CinemasController`, `AuditoriumsController`, `SeatTypesController` |
-| **`useShowtimes.js`** | **Dev C** | `getShowtimes`, `getShowtimeById`, `getShowtimeSeats`, `holdSeats`, `releaseHoldSeats`, `createShowtime`, `cancelShowtime` | `ShowtimesController` |
-| **`useBookings.js`** | **Dev D** | `createBooking`, `getBookingById`, `getMyBookings`, `cancelBooking`, `getTicketQr` | `BookingsController`, `TicketsController` |
-| **`useSnacks.js`** | **Dev D** | `getAllSnacks`, `getCinemaSnacks`, `updateCinemaSnacks` | `SnacksController`, `CinemaSnacksController` |
-| **`useAccount.js`** | **Dev E** | `register`, `login`, `getProfile`, `updateProfile`, `changePassword`, `getUsers` | `AuthController`, `UsersController` |
-| **`usePayments.js`** | **Dev E** | `createPaymentUrl`, `getPaymentStatus`, `getRevenueReport` | `PaymentsController` |
-| **`useAdminDashboard.js`** | **Dev E** *(Chủ trì)* | `getDashboardMetrics` *(kết nối API của Dev A, B, E)* | `ReportsController` |
+| File API Module            |     Người Sở Hữu      | Các Hàm Chức Năng Cốt Lõi                                                                                                                                        | Backend Controller Tương Ứng                                        |
+| -------------------------- | :-------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **`useMovies.js`**         |       **Dev A**       | `getAllMovies`, `getMovieById`, `createMovie`, `updateMovie`, `deleteMovie`, `getGenres`, `getDirectors`, `getActors`, `getTopMoviesReport`                      | `MoviesController`, `GenresController`, `ReportsController`         |
+| **`useCinemas.js`**        |       **Dev B**       | `getAllCinemas`, `getCinemaById`, `createCinema`, `updateCinema`, `deleteCinema`, `getAuditoriumSeats`, `createAuditorium`, `getSeatTypes`, `getOccupancyReport` | `CinemasController`, `AuditoriumsController`, `SeatTypesController` |
+| **`useShowtimes.js`**      |       **Dev C**       | `getShowtimes`, `getShowtimeById`, `getShowtimeSeats`, `holdSeats`, `releaseHoldSeats`, `createShowtime`, `cancelShowtime`                                       | `ShowtimesController`                                               |
+| **`useBookings.js`**       |       **Dev D**       | `createBooking`, `getBookingById`, `getMyBookings`, `cancelBooking`, `getTicketQr`                                                                               | `BookingsController`, `TicketsController`                           |
+| **`useSnacks.js`**         |       **Dev D**       | `getAllSnacks`, `getCinemaSnacks`, `updateCinemaSnacks`                                                                                                          | `SnacksController`, `CinemaSnacksController`                        |
+| **`useAccount.js`**        |       **Dev E**       | `register`, `login`, `getProfile`, `updateProfile`, `changePassword`, `getUsers`                                                                                 | `AuthController`, `UsersController`                                 |
+| **`usePayments.js`**       |       **Dev E**       | `createPaymentUrl`, `getPaymentStatus`, `getRevenueReport`                                                                                                       | `PaymentsController`                                                |
+| **`useAdminDashboard.js`** | **Dev E** _(Chủ trì)_ | `getDashboardMetrics` _(kết nối API của Dev A, B, E)_                                                                                                            | `ReportsController`                                                 |
 
 ---
 
@@ -46,51 +46,55 @@ Mỗi Dev chỉ được phép viết code và bảo trì file API thuộc phân
 
 ### A. CLIENT PORTAL (Giao Diện Dành Cho Khách Hàng)
 
-| Route URL | Component Trang | Dev Phụ Trách UI | API Module Được Sử Dụng | Backend Endpoint Gọi Thực Tế |
-|---|---|:---:|---|---|
-| `/` | `pages/Home.jsx` | **Dev A** | `useMovies.getAllMovies`<br>`useCinemas.getAllCinemas` | `GET /api/movies?status=now_showing`<br>`GET /api/cinemas` |
-| `/movies` | `pages/Movies.jsx` | **Dev A** | `useMovies.getAllMovies`<br>`useMovies.getGenres` | `GET /api/movies`<br>`GET /api/genres` |
-| `/movies/:id` | `pages/MovieDetail.jsx` | **Dev A** | `useMovies.getMovieById`<br>`useShowtimes.getShowtimes` | `GET /api/movies/{id}`<br>`GET /api/showtimes?movieId={id}` |
-| `/theaters` | `pages/Theaters.jsx` | **Dev B** | `useCinemas.getAllCinemas` | `GET /api/cinemas` |
-| `/booking/:showtimeId` | `pages/SeatLayout.jsx` | **Dev C & Dev D** | • **Dev C:** `useShowtimes.getShowtimeSeats`, `useShowtimes.holdSeats`<br>• **Dev D:** `useSnacks.getCinemaSnacks`, `useBookings.createBooking`<br>• **Dev E:** `usePayments.createPaymentUrl` | • `GET /api/showtimes/{id}/seats`<br>• `POST /api/showtimes/{id}/hold-seats`<br>• `GET /api/cinemas/{id}/snacks`<br>• `POST /api/bookings`<br>• `POST /api/payments/create-url` |
-| `/payment/callback` | `pages/PaymentCallback.jsx` | **Dev E & Dev D** | `usePayments.getPaymentStatus`<br>`useBookings.getTicketQr` | `GET /api/payments/{bookingId}`<br>`GET /api/tickets/{id}/qr` |
-| `/my-booking` | `pages/MyBooking.jsx` | **Dev D & Dev E** | `useBookings.getMyBookings`<br>`useBookings.cancelBooking` | `GET /api/bookings/my-bookings`<br>`PUT /api/bookings/{id}/cancel` |
-| `/profile` | `pages/Profile.jsx` | **Dev E** | `useAccount.getProfile`<br>`useAccount.updateProfile`<br>`useAccount.changePassword` | `GET /api/auth/me`<br>`PUT /api/users/profile`<br>`PUT /api/users/change-password` |
+| Route URL              | Component Trang                                      | Dev Phụ Trách UI  | API Module Được Sử Dụng                                                                                                                                                                                                                           | Backend Endpoint Gọi Thực Tế                                                                                                               |
+| ---------------------- | ---------------------------------------------------- | :---------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/`                    | `pages/Home.jsx`                                     |     **Dev A**     | `useMovies.getAllMovies`<br>`useCinemas.getAllCinemas`                                                                                                                                                                                            | `GET /api/movies?status=now_showing`<br>`GET /api/cinemas`                                                                                 |
+| `/movies`              | `pages/Movies.jsx`                                   |     **Dev A**     | `useMovies.getAllMovies`<br>`useMovies.getGenres`                                                                                                                                                                                                 | `GET /api/movies`<br>`GET /api/genres`                                                                                                     |
+| `/movies/:id`          | `pages/MovieDetail.jsx`                              |     **Dev A**     | `useMovies.getMovieById`<br>`useShowtimes.getShowtimes`                                                                                                                                                                                           | `GET /api/movies/{id}`<br>`GET /api/showtimes?movieId={id}`                                                                                |
+| `/theaters`            | `pages/Theaters.jsx`                                 |     **Dev B**     | `useCinemas.getAllCinemas`                                                                                                                                                                                                                        | `GET /api/cinemas`                                                                                                                         |
+| `/booking/:showtimeId` | `pages/SeatLayout.jsx`<br>_(Khung do Dev C quản lý)_ | **Dev C & Dev D** | • **Dev C (Sơ đồ ghế):** `components/booking/SeatMap.jsx` (`useShowtimes.getShowtimeSeats`, `holdSeats`)<br>• **Dev D (Bắp nước & Checkout):** `components/booking/BookingSummary.jsx` (`useSnacks.getCinemaSnacks`, `useBookings.createBooking`) | • `GET /api/showtimes/{id}/seats`<br>• `POST /api/showtimes/{id}/hold-seats`<br>• `GET /api/cinemas/{id}/snacks`<br>• `POST /api/bookings` |
+| `/payment/callback`    | `pages/PaymentCallback.jsx`                          | **Dev E & Dev D** | `usePayments.getPaymentStatus`<br>`useBookings.getTicketQr`                                                                                                                                                                                       | `GET /api/payments/{bookingId}`<br>`GET /api/tickets/{id}/qr`                                                                              |
+| `/profile`             | `pages/Profile.jsx`<br>_(Khung do Dev E quản lý)_    | **Dev E & Dev D** | • **Dev E (Tab Tài khoản):** `components/profile/AccountTab.jsx` (`useAccount.getProfile`, `updateProfile`, `changePassword`)<br>• **Dev D (Tab Vé của tôi):** `components/profile/BookingHistoryTab.jsx` (`useBookings.getMyBookings`)           | • `GET /api/auth/me`<br>• `PUT /api/users/profile`<br>• `PUT /api/users/change-password`<br>• `GET /api/bookings/my-bookings`              |
 
 ---
 
 ### B. ADMIN PORTAL (Giao Diện Dành Cho Quản Trị Viên)
 
-| Route URL | Component Trang | Dev Phụ Trách UI | API Module Được Sử Dụng | Backend Endpoint Gọi Thực Tế |
-|---|---|:---:|---|---|
-| `/admin/dashboard` | `pages/admin/Dashboard.jsx` | **Dev E** | `useAdminDashboard.getDashboardMetrics` | `GET /api/reports/revenue`<br>`GET /api/reports/top-movies`<br>`GET /api/reports/occupancy-rates` |
-| `/admin/movies` | `pages/admin/AdminMovies.jsx` | **Dev A** | `useMovies.getAllMovies`<br>`useMovies.createMovie`<br>`useMovies.updateMovie`<br>`useMovies.deleteMovie` | `GET /api/movies`<br>`POST /api/movies`<br>`PUT /api/movies/{id}`<br>`DELETE /api/movies/{id}` |
-| `/admin/cinemas` | `pages/admin/AdminCinemas.jsx` | **Dev B** | `useCinemas.getAllCinemas`<br>`useCinemas.createCinema`<br>`useCinemas.createAuditorium` | `GET /api/cinemas`<br>`POST /api/cinemas`<br>`POST /api/auditoriums` |
-| `/admin/showtimes` | `pages/admin/AdminShowtimes.jsx` | **Dev C** | `useShowtimes.getShowtimes`<br>`useShowtimes.createShowtime`<br>`useShowtimes.cancelShowtime` | `GET /api/showtimes`<br>`POST /api/showtimes`<br>`PUT /api/showtimes/{id}/cancel` |
-| `/admin/snacks` | `pages/admin/AdminSnacks.jsx` | **Dev D** | `useSnacks.getAllSnacks`<br>`useSnacks.updateCinemaSnacks` | `GET /api/snacks`<br>`POST /api/cinemas/{id}/snacks` |
-| `/admin/users` | `pages/admin/AdminUsers.jsx` | **Dev E** | `useAccount.getUsers` | `GET /api/users` |
+| Route URL          | Component Trang                  | Dev Phụ Trách UI | API Module Được Sử Dụng                                                                                   | Backend Endpoint Gọi Thực Tế                                                                      |
+| ------------------ | -------------------------------- | :--------------: | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `/admin/dashboard` | `pages/admin/Dashboard.jsx`      |    **Dev E**     | `useAdminDashboard.getDashboardMetrics`                                                                   | `GET /api/reports/revenue`<br>`GET /api/reports/top-movies`<br>`GET /api/reports/occupancy-rates` |
+| `/admin/movies`    | `pages/admin/AdminMovies.jsx`    |    **Dev A**     | `useMovies.getAllMovies`<br>`useMovies.createMovie`<br>`useMovies.updateMovie`<br>`useMovies.deleteMovie` | `GET /api/movies`<br>`POST /api/movies`<br>`PUT /api/movies/{id}`<br>`DELETE /api/movies/{id}`    |
+| `/admin/cinemas`   | `pages/admin/AdminCinemas.jsx`   |    **Dev B**     | `useCinemas.getAllCinemas`<br>`useCinemas.createCinema`<br>`useCinemas.createAuditorium`                  | `GET /api/cinemas`<br>`POST /api/cinemas`<br>`POST /api/auditoriums`                              |
+| `/admin/showtimes` | `pages/admin/AdminShowtimes.jsx` |    **Dev C**     | `useShowtimes.getShowtimes`<br>`useShowtimes.createShowtime`<br>`useShowtimes.cancelShowtime`             | `GET /api/showtimes`<br>`POST /api/showtimes`<br>`PUT /api/showtimes/{id}/cancel`                 |
+| `/admin/snacks`    | `pages/admin/AdminSnacks.jsx`    |    **Dev D**     | `useSnacks.getAllSnacks`<br>`useSnacks.updateCinemaSnacks`                                                | `GET /api/snacks`<br>`POST /api/cinemas/{id}/snacks`                                              |
+| `/admin/users`     | `pages/admin/AdminUsers.jsx`     |    **Dev E**     | `useAccount.getUsers`                                                                                     | `GET /api/users`                                                                                  |
 
 ---
 
 ## 💻 4. HƯỚNG DẪN CÀI ĐẶT & SỬ DỤNG CHO TEAM
 
 ### 1. Cài đặt thư viện `axios`:
+
 Mở terminal tại thư mục `cinema2/Frontend` và chạy:
+
 ```bash
 npm install axios
 ```
 
 ### 2. Cấu hình biến môi trường `.env` trong `Frontend`:
+
 Thêm dòng sau vào tệp `cinema2/Frontend/.env`:
+
 ```env
 VITE_API_BASE_URL=http://localhost:5000/api
 ```
 
 ### 3. Ví dụ cách Component gọi API chuẩn mực:
+
 ```jsx
 // Ví dụ trong component MovieDetail.jsx
-import React, { useEffect, useState } from 'react';
-import { useMovies, useShowtimes } from '../api';
+import React, { useEffect, useState } from "react";
+import { useMovies, useShowtimes } from "../api";
 
 const MovieDetail = ({ movieId }) => {
   const [movie, setMovie] = useState(null);
@@ -104,7 +108,7 @@ const MovieDetail = ({ movieId }) => {
         setMovie(movieData);
         setShowtimes(showtimesData);
       } catch (error) {
-        console.error('Lỗi khi tải dữ liệu phim:', error.message);
+        console.error("Lỗi khi tải dữ liệu phim:", error.message);
       }
     };
     fetchData();

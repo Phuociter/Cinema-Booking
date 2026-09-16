@@ -1,15 +1,37 @@
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-
+// 1. Add services to the container.
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// 2. Register Database Context (PostgreSQL via Npgsql)
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(connectionString));
+
+// 3. Configure CORS Policy for Frontend (Vite / React)
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins(
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:3001"
+        )
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials();
+    });
+});
+
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// 4. Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -18,6 +40,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// 5. Use CORS before Auth
+app.UseCors("AllowFrontend");
+
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
