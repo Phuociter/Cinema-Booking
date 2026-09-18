@@ -171,7 +171,7 @@
 | | Nội dung |
 |---|---|
 | **Việc BE + FE** | Sửa bug phạm vi Showtime/Seat; kiểm thử tải nhẹ (nhiều request hold cùng lúc) |
-| **Test tự làm** | Test idempotency `ReleaseSeatsAsync` (giả lập webhook fail + background job cùng chạy 1 đơn) |
+| **Test tự làm** | Test idempotency `ReleaseSeatsAsync` (giả lập 3 tình huống kích hoạt đồng thời trên 1 đơn: khách bấm hủy đơn, webhook thanh toán fail và background job quét dọn timeout) |
 | **DoD** | 0 bug đã biết, không nhả nhầm ghế trong test race condition |
 
 ---
