@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "D:\\cinema\\cinema2\\Backend\\MovieBooking.API\\MovieBooking.API.csproj": {}
+    "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.API\\MovieBooking.API.csproj": {}
   },
   "projects": {
-    "D:\\cinema\\cinema2\\Backend\\MovieBooking.API\\MovieBooking.API.csproj": {
+    "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.API\\MovieBooking.API.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\cinema\\cinema2\\Backend\\MovieBooking.API\\MovieBooking.API.csproj",
+        "projectUniqueName": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.API\\MovieBooking.API.csproj",
         "projectName": "MovieBooking.API",
-        "projectPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.API\\MovieBooking.API.csproj",
-        "packagesPath": "C:\\Users\\phuoc\\.nuget\\packages\\",
-        "outputPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.API\\obj\\",
+        "projectPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.API\\MovieBooking.API.csproj",
+        "packagesPath": "C:\\Users\\MYPC\\.nuget\\packages\\",
+        "outputPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.API\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\phuoc\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\MYPC\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
@@ -26,11 +26,11 @@
           "net8.0": {
             "targetAlias": "net8.0",
             "projectReferences": {
-              "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj": {
-                "projectPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj"
+              "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj": {
+                "projectPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj"
               },
-              "D:\\cinema\\cinema2\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj": {
-                "projectPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj"
+              "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj": {
+                "projectPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj"
               }
             }
           }
@@ -78,21 +78,21 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.319/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.425/PortableRuntimeIdentifierGraph.json"
         }
       }
     },
-    "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj": {
+    "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj",
+        "projectUniqueName": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj",
         "projectName": "MovieBooking.Data",
-        "projectPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj",
-        "packagesPath": "C:\\Users\\phuoc\\.nuget\\packages\\",
-        "outputPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\obj\\",
+        "projectPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj",
+        "packagesPath": "C:\\Users\\MYPC\\.nuget\\packages\\",
+        "outputPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\phuoc\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\MYPC\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
@@ -120,6 +120,20 @@
       "frameworks": {
         "net8.0": {
           "targetAlias": "net8.0",
+          "dependencies": {
+            "EFCore.NamingConventions": {
+              "target": "Package",
+              "version": "[8.0.3, )"
+            },
+            "Microsoft.EntityFrameworkCore": {
+              "target": "Package",
+              "version": "[8.0.11, )"
+            },
+            "Npgsql.EntityFrameworkCore.PostgreSQL": {
+              "target": "Package",
+              "version": "[8.0.8, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
@@ -136,21 +150,21 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.319/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.425/PortableRuntimeIdentifierGraph.json"
         }
       }
     },
-    "D:\\cinema\\cinema2\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj": {
+    "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj",
+        "projectUniqueName": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj",
         "projectName": "MovieBooking.Service",
-        "projectPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj",
-        "packagesPath": "C:\\Users\\phuoc\\.nuget\\packages\\",
-        "outputPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Service\\obj\\",
+        "projectPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Service\\MovieBooking.Service.csproj",
+        "packagesPath": "C:\\Users\\MYPC\\.nuget\\packages\\",
+        "outputPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Service\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\phuoc\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\MYPC\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
@@ -162,8 +176,8 @@
           "net8.0": {
             "targetAlias": "net8.0",
             "projectReferences": {
-              "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj": {
-                "projectPath": "D:\\cinema\\cinema2\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj"
+              "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj": {
+                "projectPath": "D:\\y4-hki\\.NET\\Cinema-Booking\\Backend\\MovieBooking.Data\\MovieBooking.Data.csproj"
               }
             }
           }
@@ -212,7 +226,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.319/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.425/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

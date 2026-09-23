@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { dummyShowsData } from '../assets/assets';
 import MovieCard from '../components/MovieCard';
 import { 
   Search, 
@@ -17,6 +16,20 @@ import {
 } from 'lucide-react';
 import BlurCircle from '../components/BlurCircle';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5103';
+
+const mapMovie = (movie) => ({
+  ...movie,
+  _id: movie.id,
+  poster_path: movie.posterUrl || movie.backdropUrl,
+  backdrop_path: movie.posterUrl || movie.backdropUrl,
+  release_date: movie.releaseDate,
+  runtime: movie.durationMin,
+  vote_average: movie.ratingScore,
+  genre: movie.genres?.join(', '),
+  genres: movie.genres?.map((name) => ({ name })) || []
+});
+
 const Movies = () => {
   const [movies, setMovies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -27,15 +40,29 @@ const Movies = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [filteredMovies, setFilteredMovies] = useState([]);
 
-  // Mock loading effect
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setMovies(dummyShowsData);
-      setLoading(false);
-    }, 1000);
+    const loadMovies = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/movies?status=now_showing&page=1&pageSize=100`);
+        if (!response.ok) throw new Error('Không thể tải danh sách phim');
+        const data = await response.json();
+        setMovies((data.items || []).map(mapMovie));
+      } catch (error) {
+        console.error(error);
+        setMovies([]);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    return () => clearTimeout(timer);
+    loadMovies();
   }, []);
+
+  useEffect(() => {
+    if (movies.length === 0) {
+      setLoading(false);
+    }
+  }, [movies]);
 
   // Filter and search movies
   useEffect(() => {
