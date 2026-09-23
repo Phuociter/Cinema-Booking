@@ -1,12 +1,27 @@
 import axiosInstance from './axiosInstance';
 
-/**
- * API Module: Snacks & Cinema Menus (Phụ trách: Dev D)
- * Quản lý toàn bộ API Danh mục Bắp nước master và Menu bắp nước theo từng cụm rạp
- */
-
 export const useSnacks = {
+    getAllSnacks: async () => {
+        try {
+            const response = await axiosInstance.get('/api/snacks');
+            // Cập nhật dòng dưới đây
+            return response.data || response;
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách bắp nước:", error);
+            return [];
+        }
+    },
 
+    getCinemaSnacks: async (cinemaId) => {
+        try {
+            const response = await axiosInstance.get(`/api/cinemas/${cinemaId}/snacks`);
+            // Cập nhật dòng dưới đây
+            return response.data || response;
+        } catch (error) {
+            console.error(`Lỗi khi lấy menu bắp nước cho rạp ${cinemaId}:`, error);
+            return [];
+        }
+    }
 };
 
 export default useSnacks;

@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { dummyShowsData, dummyDashboardData } from '../assets/assets';
 import { ArrowLeft, User, Clock, MapPin, CreditCard, Check, X, Users, Crown, Heart as HeartIcon } from 'lucide-react';
 import BlurCircle from '../components/BlurCircle';
+import BookingSummary from '../components/booking/BookingSummary'; // Thay đổi đường dẫn nếu component của bạn nằm ở thư mục khác
 
 const SeatLayout = () => {
   const { movieId, showId } = useParams();
@@ -395,7 +396,13 @@ const SeatLayout = () => {
 
               {bookingStep === 'confirm' && (
                 <div className="text-center py-12">
-                  <h3 className="text-2xl font-bold text-white mb-8">Xác nhận thông tin đặt vé</h3>
+                <h3 className="text-2xl font-bold text-white mb-8">Xác nhận thông tin đặt vé</h3>
+                     {/* Lắp component bắp nước của bạn vào đây */}
+                         <BookingSummary
+                             cinemaId="00000004-0000-0000-0000-000000000001"
+                             holdToken={true}
+                             totalHoldPrice={100000}
+                          />
                   <div className="max-w-md mx-auto bg-gray-800/50 rounded-xl p-6 space-y-4">
                     <div className="flex justify-between">
                       <span className="text-gray-400">Phim:</span>
