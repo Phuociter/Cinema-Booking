@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MovieBooking.Data;
+using MovieBooking.Service.Interfaces;
+using MovieBooking.Service.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,6 +14,7 @@ builder.Services.AddSwaggerGen();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
+builder.Services.AddScoped<IMovieService, MovieService>();
 
 // 3. Configure CORS Policy for Frontend (Vite / React)
 builder.Services.AddCors(options =>
