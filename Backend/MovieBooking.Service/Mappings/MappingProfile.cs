@@ -29,7 +29,10 @@ public class MappingProfile : Profile
             .ForMember(d => d.PosterUrl, opt => opt.MapFrom(s => s.Movie.PosterUrl))
             .ForMember(d => d.AuditoriumName, opt => opt.MapFrom(s => s.Auditorium.Name))
             .ForMember(d => d.CinemaId, opt => opt.MapFrom(s => s.Auditorium.CinemaId))
-            .ForMember(d => d.CinemaName, opt => opt.MapFrom(s => s.Auditorium.Cinema.Name));
+            .ForMember(d => d.CinemaName, opt => opt.MapFrom(s => s.Auditorium.Cinema.Name))
+            .ForMember(d => d.City, opt => opt.MapFrom(s => s.Auditorium.Cinema.City))
+            .ForMember(d => d.Address, opt => opt.MapFrom(s => s.Auditorium.Cinema.Address))
+            .ForMember(d => d.HallType, opt => opt.MapFrom(s => s.Auditorium.HallType));
 
         CreateMap<ShowtimeSeat, ShowtimeSeatDto>()
             .ForMember(d => d.RowLabel, opt => opt.MapFrom(s => s.Seat.RowLabel))
