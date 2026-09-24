@@ -15,8 +15,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import BlurCircle from '../components/BlurCircle';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5103';
+import { axiosInstance } from '../api';
 
 const mapMovie = (movie) => ({
   ...movie,
@@ -43,12 +42,11 @@ const Movies = () => {
   useEffect(() => {
     const loadMovies = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/movies?status=now_showing&page=1&pageSize=100`);
-        if (!response.ok) throw new Error('Không thể tải danh sách phim');
-        const data = await response.json();
+        setLoading(true);
+        const data = await axiosInstance.get('/movies?status=now_showing&page=1&pageSize=100');
         setMovies((data.items || []).map(mapMovie));
       } catch (error) {
-        console.error(error);
+        console.error('Lỗi khi tải danh sách phim:', error);
         setMovies([]);
       } finally {
         setLoading(false);

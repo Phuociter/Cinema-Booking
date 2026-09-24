@@ -93,20 +93,18 @@ builder.Services.AddAuthentication(options =>
 });
 builder.Services.AddAuthorization();
 
-// 8. CORS Policy for Frontend (Vite & React)
+// 8. CORS Policy for Frontend
+var allowedOrigins = ResolveAllowedOrigins(builder.Configuration);
+Console.WriteLine($"[CORS] Allowed origins: {string.Join(", ", allowedOrigins)}");
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "http://localhost:3001",
-            "http://localhost:3002"
-        )
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials();
+        policy.WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -127,3 +125,32 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static string[] ResolveAllowedOrigins(IConfiguration configuration)
+{
+    // Ưu tiên 1: mảng cấu hình chuẩn trong appsettings.json
+    var fromConfigSection = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+    if (fromConfigSection is { Length: > 0 })
+    {
+        return fromConfigSection;
+    }
+
+    // Ưu tiên 2: biến môi trường dạng danh sách phân tách bởi dấu phẩy
+    var fromCommaSeparatedEnv = configuration["CORS_ALLOWED_ORIGINS"]
+        ?? Environment.GetEnvironmentVariable("CORS_ALLOWED_ORIGINS");
+    if (!string.IsNullOrWhiteSpace(fromCommaSeparatedEnv))
+    {
+        return fromCommaSeparatedEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    // Ưu tiên 3: 1 origin đơn lẻ từ FRONTEND_URL
+    var singleOrigin = configuration["FRONTEND_URL"]
+        ?? Environment.GetEnvironmentVariable("FRONTEND_URL");
+    if (!string.IsNullOrWhiteSpace(singleOrigin))
+    {
+        return [singleOrigin];
+    }
+
+    // Fallback cuối cùng: cổng dev mặc định
+    return ["http://localhost:3001"];
+}

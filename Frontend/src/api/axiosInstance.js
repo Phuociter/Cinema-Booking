@@ -39,6 +39,16 @@ axiosInstance.interceptors.response.use(
     return response.data;
   },
   (error) => {
+    // Trích xuất thông điệp lỗi tiếng Việt từ Backend nếu có
+    const backendMessage =
+      error.response?.data?.message ||
+      error.response?.data?.title ||
+      error.response?.data?.error;
+
+    if (backendMessage && typeof backendMessage === 'string') {
+      error.message = backendMessage;
+    }
+
     if (error.response?.status === 401) {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem('cinema_user');
