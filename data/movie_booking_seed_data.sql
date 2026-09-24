@@ -297,4 +297,46 @@ SELECT ('0000000c-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid,
        (SELECT id FROM Roles WHERE name = 'Customer')
 FROM generate_series(1, 20) AS n;
 
+-- ============================================================
+-- GROUP 6 (Dev D & Dev E): MOCK PENDING BOOKINGS FOR PAYMENT TEST
+-- ============================================================
+-- ⚠️ GHI CHÚ QUAN TRỌNG VỀ ĐỐI CHIẾU DỮ LIỆU:
+-- Để KHÔNG xung đột với Suất chiếu #1 ('00000008-...0001') - nơi Dev C và Dev D
+-- dùng để demo sơ đồ ghế và test Hold Engine cho ghế E1/E2 ('00000006-...0001' và '...0002'):
+-- ➔ 5 ghế dưới đây được lấy từ SUẤT CHIẾU #2 ('00000008-...0002', các ID từ '...0049' đến '...0053').
+-- 5 ghế này được đặt status = 'reserved' vĩnh viễn cho mục đích:
+--   1. Cung cấp dữ liệu mẫu đơn 'pending' để Dev E test cổng thanh toán MoMo/VNPay (Tuần 4).
+--   2. Dùng làm dữ liệu mẫu hiển thị ghế đã bán/bị khóa khi xem Suất chiếu #2.
+-- Suất chiếu #1 hoàn toàn sạch (100% available) phục vụ Dev C và Dev D demo luồng thật.
+-- ============================================================
+
+-- 1. Insert 3 đơn Bookings pending mẫu (không tạo Payments để Dev E tự tạo record khi test)
+INSERT INTO Bookings (id, user_id, booking_code, total_amount, status, created_at, updated_at) VALUES
+('0000000d-0000-0000-0000-000000000001', '0000000c-0000-0000-0000-000000000001', 'BK-MOMO-TEST-001', 190000, 'pending', now(), now()),
+('0000000d-0000-0000-0000-000000000002', '0000000c-0000-0000-0000-000000000001', 'BK-MOMO-TEST-002', 290000, 'pending', now(), now()),
+('0000000d-0000-0000-0000-000000000003', '0000000c-0000-0000-0000-000000000002', 'BK-MOMO-TEST-003', 95000,  'pending', now(), now());
+
+-- 2. Insert Tickets liên kết ghế cho 3 đơn trên (dùng ghế 49-53 thuộc Suất chiếu #2)
+INSERT INTO Tickets (id, booking_id, showtime_seat_id, price, created_at) VALUES
+('0000000e-0000-0000-0000-000000000001', '0000000d-0000-0000-0000-000000000001', '0000000a-0000-0000-0000-000000000049', 95000, now()),
+('0000000e-0000-0000-0000-000000000002', '0000000d-0000-0000-0000-000000000001', '0000000a-0000-0000-0000-000000000050', 95000, now()),
+('0000000e-0000-0000-0000-000000000003', '0000000d-0000-0000-0000-000000000002', '0000000a-0000-0000-0000-000000000051', 95000, now()),
+('0000000e-0000-0000-0000-000000000004', '0000000d-0000-0000-0000-000000000002', '0000000a-0000-0000-0000-000000000052', 95000, now()),
+('0000000e-0000-0000-0000-000000000005', '0000000d-0000-0000-0000-000000000003', '0000000a-0000-0000-0000-000000000053', 95000, now());
+
+-- 3. Cập nhật 5 ghế thuộc Suất chiếu #2 sang trạng thái 'reserved'
+UPDATE ShowtimeSeats 
+SET status = 'reserved' 
+WHERE id IN (
+    '0000000a-0000-0000-0000-000000000049',
+    '0000000a-0000-0000-0000-000000000050',
+    '0000000a-0000-0000-0000-000000000051',
+    '0000000a-0000-0000-0000-000000000052',
+    '0000000a-0000-0000-0000-000000000053'
+);
+
+-- 4. Insert bắp nước cho đơn số 2 (2 phần bắp nước = 100.000đ)
+INSERT INTO BookingSnacks (id, booking_id, cinema_snack_id, quantity, unit_price) VALUES
+('0000000f-0000-0000-0000-000000000001', '0000000d-0000-0000-0000-000000000002', '0000000b-0000-0000-0000-000000000001', 2, 50000);
+
 COMMIT;

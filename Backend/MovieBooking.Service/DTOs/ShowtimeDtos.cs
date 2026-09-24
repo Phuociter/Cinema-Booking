@@ -10,6 +10,9 @@ public class ShowtimeDto
     public string AuditoriumName { get; set; } = string.Empty;
     public Guid CinemaId { get; set; }
     public string CinemaName { get; set; } = string.Empty;
+    public string? City { get; set; }
+    public string? Address { get; set; }
+    public string? HallType { get; set; }
     public DateTime StartTime { get; set; }
     public DateTime EndTime { get; set; }
     public decimal BasePrice { get; set; }
