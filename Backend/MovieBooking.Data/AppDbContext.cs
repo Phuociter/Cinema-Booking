@@ -36,6 +36,11 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<MovieGenre>().ToTable("moviegenres");
+        modelBuilder.Entity<MovieDirector>().ToTable("moviedirectors");
+        modelBuilder.Entity<MovieActor>().ToTable("movieactors");
+        modelBuilder.Entity<UserRole>().ToTable("userroles");
+
         // Composite Keys
         modelBuilder.Entity<MovieGenre>().HasKey(x => new { x.MovieId, x.GenreId });
         modelBuilder.Entity<MovieDirector>().HasKey(x => new { x.MovieId, x.DirectorId });

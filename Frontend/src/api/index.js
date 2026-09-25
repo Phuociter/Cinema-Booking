@@ -1,5 +1,5 @@
 export { default as axiosInstance } from './axiosInstance';
-export { default as useAccount } from './useAccount';
+export { accountApi, useAccount } from './useAccount';
 export { default as useMovies } from './useMovies';
 export { default as useCinemas } from './useCinemas';
 export { default as useShowtimes } from './useShowtimes';
