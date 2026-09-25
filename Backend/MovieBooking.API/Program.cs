@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MovieBooking.Data;
+using MovieBooking.Service.Services;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,6 +9,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddScoped<ICinemaService, CinemaService>();
 
 // 2. Register Database Context (PostgreSQL via Npgsql)
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
