@@ -13,15 +13,17 @@ import {
   Heart,
   User,
   LogIn,
-  ChevronDown
+  ChevronDown,
+  LogOut
 } from 'lucide-react';
-import { useClerk, UserButton, useUser } from '@clerk/clerk-react';
+import { useAuth } from '../auth/AuthContext';
+import AuthModal from './AuthModal';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const { user } = useUser();
-  const { openSignIn } = useClerk();
+  const { user, isAuthenticated, logout } = useAuth();
+  const [authModal, setAuthModal] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -146,9 +148,9 @@ const Navbar = () => {
               </button>
 
               {/* User Section */}
-              {!user ? (
+              {!isAuthenticated ? (
                 <button 
-                  onClick={openSignIn}
+                  onClick={() => setAuthModal('login')}
                   className="flex items-center gap-2 px-4 lg:px-6 py-2 lg:py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium rounded-full transition-all duration-300 hover:scale-105 shadow-lg hover:shadow-red-500/25"
                 >
                   <LogIn className="w-4 h-4" />
@@ -159,34 +161,13 @@ const Navbar = () => {
                   {/* User greeting (desktop only) */}
                   <div className="hidden lg:flex items-center gap-2 text-gray-300">
                     <span className="text-sm">Chào,</span>
-                    <span className="text-white font-medium">{user.firstName || 'Bạn'}</span>
+                    <span className="text-white font-medium">{user?.fullName || 'Bạn'}</span>
                   </div>
                   
-                  {/* Custom User Button */}
-                  <div className="relative group">
-                    <UserButton 
-                      appearance={{
-                        elements: {
-                          avatarBox: "w-10 h-10 rounded-full ring-2 ring-white/20 hover:ring-red-500/50 transition-all duration-300",
-                          userButtonPopoverCard: "bg-gray-900 border border-gray-700 shadow-2xl",
-                          userButtonPopoverFooter: "hidden"
-                        }
-                      }}
-                    >
-                      <UserButton.MenuItems>
-                        <UserButton.Link
-                          label="Vé đã đặt"
-                          labelIcon={<TicketCheck className="w-4 h-4" />}
-                          href="/my-booking"
-                        />
-                        <UserButton.Action 
-                          label="Thông tin cá nhân"
-                          labelIcon={<User className="w-4 h-4" />}
-                          onClick={() => navigate('/profile')}
-                        />
-                      </UserButton.MenuItems>
-                    </UserButton>
-                  </div>
+                  <button onClick={logout} className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-sm text-gray-300 hover:bg-white/20 hover:text-white">
+                    <LogOut className="h-4 w-4" />
+                    <span className="hidden sm:inline">Đăng xuất</span>
+                  </button>
                 </div>
               )}
 
@@ -252,7 +233,7 @@ const Navbar = () => {
               })}
 
               {/* Mobile User Info */}
-              {user && (
+              {isAuthenticated && (
                 <div className="pt-4 mt-4 border-t border-white/10">
                   <div className="flex items-center gap-3 px-4 py-3 bg-white/5 rounded-xl">
                     <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
@@ -260,10 +241,10 @@ const Navbar = () => {
                     </div>
                     <div>
                       <p className="text-white font-medium">
-                        {user.firstName} {user.lastName}
+                        {user?.fullName || 'Bạn'}
                       </p>
                       <p className="text-gray-400 text-sm">
-                        {user.emailAddresses[0]?.emailAddress}
+                        {user?.email}
                       </p>
                     </div>
                   </div>
@@ -287,6 +268,7 @@ const Navbar = () => {
 
       {/* Spacer to prevent content overlap */}
       <div className="h-16 lg:h-20" />
+      {authModal && <AuthModal mode={authModal} onClose={() => setAuthModal(null)} />}
     </>
   );
 };
