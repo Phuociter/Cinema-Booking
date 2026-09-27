@@ -35,7 +35,6 @@ export const accountApi = {
       )
     );
   },
-
   async getProfile() {
     return request(() => axiosInstance.get('/auth/me'));
   },

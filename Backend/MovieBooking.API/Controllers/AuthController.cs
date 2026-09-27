@@ -233,7 +233,6 @@ public class AuthController : ControllerBase
             user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = customerRole.Id, Role = customerRole });
         }
     }
-
     private static List<string> GetRoles(User user)
     {
         var roles = user.UserRoles
