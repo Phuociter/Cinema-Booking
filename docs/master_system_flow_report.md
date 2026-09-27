@@ -188,6 +188,40 @@ Job: ExpireStalePendingBookings (Dev D chủ trì)
 
 ---
 
+### 🌊 LUỒNG BỔ SUNG: HYBRID AUTHENTICATION (LOCAL DB + CLERK SSO) (DEV E)
+
+Hệ thống hỗ trợ song song 2 hình thức xác thực: Đăng nhập nội bộ (Local Email/Password) và Đăng nhập xã hội qua Clerk SSO (Google, Github,...):
+
+```text
+[Khách Hàng] ──► Chọn Đăng nhập qua Clerk trên Frontend (React)
+      │
+      ├── [Bước 1: Xác thực phía Clerk]
+      │   Client nhận Session Token từ Clerk (JWT chứa sub, email, email_verified, name)
+      │
+      └── [Bước 2: Đồng bộ tài khoản với Backend]
+          useAccount.clerkSync(clerkToken) ──( POST /api/auth/clerk-sync )──► AuthController
+          │
+          ▼ (Backend - MovieBooking.API)
+          ├── 1. Xác thực JWT Clerk bằng Scheme [Authorize(AuthenticationSchemes = "ClerkJwt")]
+          │      (Kiểm tra chữ ký số JWKS từ Clerk Frontend API URL)
+          ├── 2. Kiểm tra claim email_verified == "true" (Bảo vệ an toàn định danh tài khoản)
+          ├── 3. Kiểm tra DB: Tìm user theo ClerkId hoặc Email
+          │      ├── Nếu đã có ClerkId: Cập nhật thông tin profile
+          │      ├── Nếu đã có Email (Local): Liên kết tài khoản (clerk_id = sub, giữ nguyên password_hash)
+          │      └── Nếu chưa có: Tạo mới User (auth_provider = 'clerk', password_hash = NULL, gán Role 'Customer')
+          └── 4. Sinh và trả về JWT nội bộ (InternalJwt) + UserDto
+          │
+          ▼ (Frontend)
+          AuthContext lưu JWT nội bộ vào localStorage ➔ Đăng nhập thành công, sử dụng đồng bộ với toàn bộ API đặt vé và thanh toán!
+```
+
+- **Điểm chốt kỹ thuật:**
+  - **Dual JWT Schemes (Program.cs):** Cấu hình `InternalJwt` (default cho toàn bộ API hệ thống) và `ClerkJwt` (dùng riêng cho endpoint `/api/auth/clerk-sync`).
+  - **Database Migration:** Bảng `users` cho phép `password_hash` nullable, bổ sung cột `auth_provider` (default 'local'), `clerk_id` (unique) và check constraint `chk_users_has_at_least_one_auth`.
+  - **Bảo mật Account Linking:** Chỉ liên kết tài khoản khi claim `email_verified` trả về `"true"`. Bọc `try/catch (DbUpdateException)` xử lý race condition ở mức cơ bản, còn TODO cải thiện khi cần scale.
+
+---
+
 ## 📊 3. MA TRẬN PHÂN CÔNG & QUẢN LÝ CHO TECH LEAD
 
 | Dev | Phân Hệ Chính | Các Bảng DB Sở Hữu | Backend Service & Controller | Frontend Hooks & Pages |

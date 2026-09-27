@@ -36,6 +36,11 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<MovieGenre>().ToTable("moviegenres");
+        modelBuilder.Entity<MovieDirector>().ToTable("moviedirectors");
+        modelBuilder.Entity<MovieActor>().ToTable("movieactors");
+        modelBuilder.Entity<UserRole>().ToTable("userroles");
+
         // Composite Keys
         modelBuilder.Entity<MovieGenre>().HasKey(x => new { x.MovieId, x.GenreId });
         modelBuilder.Entity<MovieDirector>().HasKey(x => new { x.MovieId, x.DirectorId });
@@ -130,5 +135,26 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Snack>().HasQueryFilter(x => x.DeletedAt == null);
         modelBuilder.Entity<CinemaSnack>().HasQueryFilter(x => x.DeletedAt == null);
         modelBuilder.Entity<SeatType>().HasQueryFilter(x => x.DeletedAt == null);
+
+        // Chuẩn hóa tên bảng sang lowercase và tên cột sang snake_case tương thích PostgreSQL
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            var tableName = entity.GetTableName();
+            if (!string.IsNullOrEmpty(tableName))
+            {
+                entity.SetTableName(tableName.ToLower());
+            }
+
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
+    }
+
+    private static string ToSnakeCase(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        return System.Text.RegularExpressions.Regex.Replace(input, @"([a-z0-9])([A-Z])", "$1_$2").ToLower();
     }
 }
