@@ -48,12 +48,29 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<UserRole>().HasKey(x => new { x.UserId, x.RoleId });
 
         // Unique Constraints & Indexes
-        modelBuilder.Entity<Seat>().HasIndex(x => new { x.AuditoriumId, x.SeatCode }).IsUnique();
-        modelBuilder.Entity<Seat>().HasIndex(x => new { x.AuditoriumId, x.RowLabel, x.ColumnNumber }).IsUnique();
-        modelBuilder.Entity<ShowtimeSeat>().HasIndex(x => new { x.ShowtimeId, x.SeatId }).IsUnique();
-        modelBuilder.Entity<Ticket>().HasIndex(x => x.ShowtimeSeatId).IsUnique();
-        modelBuilder.Entity<CinemaSnack>().HasIndex(x => new { x.CinemaId, x.SnackId }).IsUnique();
-        modelBuilder.Entity<Booking>().HasIndex(x => x.BookingCode).IsUnique();
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.SeatCode })
+            .IsUnique();
+
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.RowLabel, x.ColumnNumber })
+            .IsUnique();
+
+        modelBuilder.Entity<ShowtimeSeat>()
+            .HasIndex(x => new { x.ShowtimeId, x.SeatId })
+            .IsUnique();
+
+        modelBuilder.Entity<Ticket>()
+            .HasIndex(x => x.ShowtimeSeatId)
+            .IsUnique();
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasIndex(x => new { x.CinemaId, x.SnackId })
+            .IsUnique();
+
+        modelBuilder.Entity<Booking>()
+            .HasIndex(x => x.BookingCode)
+            .IsUnique();
 
         // Partial unique index for active users only
         modelBuilder.Entity<User>()
@@ -61,7 +78,7 @@ public class AppDbContext : DbContext
             .IsUnique()
             .HasFilter("\"deleted_at\" IS NULL");
 
-        // Relationships & Delete Behaviors (Protect financial & structural records)
+        // Relationships & Delete Behaviors
         modelBuilder.Entity<Booking>()
             .HasOne(b => b.User)
             .WithMany(u => u.Bookings)
