@@ -36,6 +36,11 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<MovieGenre>().ToTable("moviegenres");
+        modelBuilder.Entity<MovieDirector>().ToTable("moviedirectors");
+        modelBuilder.Entity<MovieActor>().ToTable("movieactors");
+        modelBuilder.Entity<UserRole>().ToTable("userroles");
+
         // Composite Keys
         modelBuilder.Entity<MovieGenre>().HasKey(x => new { x.MovieId, x.GenreId });
         modelBuilder.Entity<MovieDirector>().HasKey(x => new { x.MovieId, x.DirectorId });
@@ -43,12 +48,29 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<UserRole>().HasKey(x => new { x.UserId, x.RoleId });
 
         // Unique Constraints & Indexes
-        modelBuilder.Entity<Seat>().HasIndex(x => new { x.AuditoriumId, x.SeatCode }).IsUnique();
-        modelBuilder.Entity<Seat>().HasIndex(x => new { x.AuditoriumId, x.RowLabel, x.ColumnNumber }).IsUnique();
-        modelBuilder.Entity<ShowtimeSeat>().HasIndex(x => new { x.ShowtimeId, x.SeatId }).IsUnique();
-        modelBuilder.Entity<Ticket>().HasIndex(x => x.ShowtimeSeatId).IsUnique();
-        modelBuilder.Entity<CinemaSnack>().HasIndex(x => new { x.CinemaId, x.SnackId }).IsUnique();
-        modelBuilder.Entity<Booking>().HasIndex(x => x.BookingCode).IsUnique();
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.SeatCode })
+            .IsUnique();
+
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.RowLabel, x.ColumnNumber })
+            .IsUnique();
+
+        modelBuilder.Entity<ShowtimeSeat>()
+            .HasIndex(x => new { x.ShowtimeId, x.SeatId })
+            .IsUnique();
+
+        modelBuilder.Entity<Ticket>()
+            .HasIndex(x => x.ShowtimeSeatId)
+            .IsUnique();
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasIndex(x => new { x.CinemaId, x.SnackId })
+            .IsUnique();
+
+        modelBuilder.Entity<Booking>()
+            .HasIndex(x => x.BookingCode)
+            .IsUnique();
 
         // Partial unique index for active users only
         modelBuilder.Entity<User>()
@@ -56,7 +78,7 @@ public class AppDbContext : DbContext
             .IsUnique()
             .HasFilter("\"deleted_at\" IS NULL");
 
-        // Relationships & Delete Behaviors (Protect financial & structural records)
+        // Relationships & Delete Behaviors
         modelBuilder.Entity<Booking>()
             .HasOne(b => b.User)
             .WithMany(u => u.Bookings)
@@ -130,5 +152,26 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Snack>().HasQueryFilter(x => x.DeletedAt == null);
         modelBuilder.Entity<CinemaSnack>().HasQueryFilter(x => x.DeletedAt == null);
         modelBuilder.Entity<SeatType>().HasQueryFilter(x => x.DeletedAt == null);
+
+        // Chuẩn hóa tên bảng sang lowercase và tên cột sang snake_case tương thích PostgreSQL
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            var tableName = entity.GetTableName();
+            if (!string.IsNullOrEmpty(tableName))
+            {
+                entity.SetTableName(tableName.ToLower());
+            }
+
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
+    }
+
+    private static string ToSnakeCase(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        return System.Text.RegularExpressions.Regex.Replace(input, @"([a-z0-9])([A-Z])", "$1_$2").ToLower();
     }
 }

@@ -19,6 +19,21 @@ public class MovieDto
     public List<MovieActorDto> Actors { get; set; } = new();
 }
 
+public class MovieListResponse
+{
+    public List<MovieDto> Items { get; set; } = new();
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public int TotalItems { get; set; }
+    public int TotalPages { get; set; }
+}
+
+public class GenreDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
 public class MovieActorDto
 {
     public Guid ActorId { get; set; }
