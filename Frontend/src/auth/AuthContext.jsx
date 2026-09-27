@@ -43,13 +43,14 @@ export function AuthProvider({ children }) {
 
   const login = (payload) => authenticate(accountApi.login(payload));
   const register = (payload) => authenticate(accountApi.register(payload));
+  const loginWithClerk = (clerkToken) => authenticate(accountApi.clerkSync(clerkToken));
   const logout = () => {
     setToken(null);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ token, user, isAuthenticated: Boolean(token), login, register, logout }}>
+    <AuthContext.Provider value={{ token, user, isAuthenticated: Boolean(token), login, register, loginWithClerk, logout }}>
       {children}
     </AuthContext.Provider>
   );

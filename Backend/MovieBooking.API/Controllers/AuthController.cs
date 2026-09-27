@@ -53,9 +53,7 @@ public class AuthController : ControllerBase
             UpdatedAt = DateTime.UtcNow
         };
 
-        var customerRole = await _context.Roles.FirstOrDefaultAsync(role => role.Name == "Customer");
-        if (customerRole != null)
-            user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = customerRole.Id, Role = customerRole });
+        await AssignCustomerRoleAsync(user);
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
@@ -89,7 +87,7 @@ public class AuthController : ControllerBase
                 .ThenInclude(userRole => userRole.Role)
             .FirstOrDefaultAsync(u => u.Email == request.Email.Trim() && u.DeletedAt == null);
 
-        if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        if (user == null || string.IsNullOrEmpty(user.PasswordHash) || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             return Unauthorized(new { message = "Email hoặc mật khẩu không hợp lệ" });
 
         var roles = GetRoles(user);
@@ -138,6 +136,103 @@ public class AuthController : ControllerBase
         });
     }
 
+    [HttpPost("clerk-sync")]
+    [Authorize(AuthenticationSchemes = "ClerkJwt")]
+    public async Task<IActionResult> ClerkSync()
+    {
+        var clerkUserId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var email = User.FindFirstValue("email") ?? User.FindFirstValue(ClaimTypes.Email);
+        var fullName = User.FindFirstValue("name") ?? User.FindFirstValue(ClaimTypes.Name);
+        var emailVerified = User.FindFirstValue("email_verified");
+
+        if (string.IsNullOrEmpty(clerkUserId) || string.IsNullOrEmpty(email))
+            return Unauthorized(new { message = "Token Clerk không hợp lệ hoặc thiếu thông tin email" });
+
+        if (!string.Equals(emailVerified, "true", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Email chưa được xác thực qua Clerk" });
+
+        var normalizedEmail = email.Trim();
+
+        // 1. Tìm theo clerk_id
+        var user = await _context.Users
+            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.ClerkId == clerkUserId && u.DeletedAt == null);
+
+        if (user == null)
+        {
+            // 2. Tìm theo email để liên kết với tài khoản local có sẵn
+            user = await _context.Users
+                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                .FirstOrDefaultAsync(u => u.Email == normalizedEmail && u.DeletedAt == null);
+
+            if (user != null)
+            {
+                user.ClerkId = clerkUserId;
+                user.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                // 3. Tạo mới tài khoản Clerk
+                user = new User
+                {
+                    Id = Guid.NewGuid(),
+                    FullName = fullName ?? normalizedEmail,
+                    Email = normalizedEmail,
+                    ClerkId = clerkUserId,
+                    AuthProvider = "clerk",
+                    PasswordHash = null,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await AssignCustomerRoleAsync(user);
+                _context.Users.Add(user);
+            }
+
+            // TODO: xử lý race condition kỹ hơn nếu cần scale
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                _context.ChangeTracker.Clear();
+                user = await _context.Users
+                    .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+                    .FirstOrDefaultAsync(u => u.Email == normalizedEmail && u.DeletedAt == null);
+
+                if (user == null)
+                    throw;
+            }
+        }
+
+        var roles = GetRoles(user);
+        var token = GenerateJwtToken(user, roles);
+
+        return Ok(new AuthResponse
+        {
+            Token = token,
+            ExpireAt = DateTime.UtcNow.AddHours(24),
+            User = new UserDto
+            {
+                Id = user.Id,
+                FullName = user.FullName,
+                Email = user.Email,
+                Phone = user.Phone,
+                AvatarUrl = user.AvatarUrl,
+                Roles = roles
+            }
+        });
+    }
+
+    private async Task AssignCustomerRoleAsync(User user)
+    {
+        var customerRole = await _context.Roles.FirstOrDefaultAsync(role => role.Name == "Customer");
+        if (customerRole != null)
+        {
+            user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = customerRole.Id, Role = customerRole });
+        }
+    }
     private static List<string> GetRoles(User user)
     {
         var roles = user.UserRoles

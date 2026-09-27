@@ -6,7 +6,9 @@ public class User : ISoftDeletable
     public string? FullName { get; set; }
     public string Email { get; set; } = string.Empty;
     public string? Phone { get; set; }
-    public string PasswordHash { get; set; } = string.Empty;
+    public string? PasswordHash { get; set; }
+    public string AuthProvider { get; set; } = "local";
+    public string? ClerkId { get; set; }
     public string? AvatarUrl { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

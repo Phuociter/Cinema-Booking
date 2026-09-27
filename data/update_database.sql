@@ -14,6 +14,37 @@
 BEGIN;
 
 -- ============================================================
+-- PHẦN 0: CẬP NHẬT CẤU TRÚC BẢNG USERS (HỖ TRỢ HYBRID AUTH / CLERK SSO)
+-- ============================================================
+
+-- 1. Cho phép password_hash NULL (user đăng ký qua Clerk sẽ không có password)
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+
+-- 2. Thêm cột nhận diện provider + Clerk ID (an toàn Idempotent)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'auth_provider') THEN
+        ALTER TABLE users ADD COLUMN auth_provider VARCHAR(20) NOT NULL DEFAULT 'local';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'clerk_id') THEN
+        ALTER TABLE users ADD COLUMN clerk_id VARCHAR(100) NULL;
+    END IF;
+END $$;
+
+-- 3. Ràng buộc duy nhất clerk_id và kiểm tra có ít nhất 1 phương thức xác thực
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_users_clerk_id') THEN
+        ALTER TABLE users ADD CONSTRAINT uq_users_clerk_id UNIQUE (clerk_id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_users_has_at_least_one_auth') THEN
+        ALTER TABLE users ADD CONSTRAINT chk_users_has_at_least_one_auth CHECK (
+            password_hash IS NOT NULL OR clerk_id IS NOT NULL
+        );
+    END IF;
+END $$;
+
+-- ============================================================
 -- PHẦN 1: CHUẨN HÓA FONT TIẾNG VIỆT UTF-8
 -- ============================================================
 

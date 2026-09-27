@@ -22,6 +22,19 @@ export const accountApi = {
     return request(() => axiosInstance.post('/auth/login', payload));
   },
 
+  async clerkSync(clerkToken) {
+    return request(() =>
+      axiosInstance.post(
+        '/auth/clerk-sync',
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${clerkToken}`,
+          },
+        }
+      )
+    );
+  },
   async getProfile() {
     return request(() => axiosInstance.get('/auth/me'));
   },

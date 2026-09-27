@@ -71,15 +71,26 @@ builder.Services.AddSingleton<IRedisService, RedisService>();
 // 6. Register Application Services
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
+builder.Services.AddScoped<ISnackService, SnackService>();
 
-// 7. JWT Authentication & Authorization
-var jwtSecret = builder.Configuration["JWT_SECRET"] ?? Environment.GetEnvironmentVariable("JWT_SECRET") ?? "super_secret_key_for_dev_1234567890";
+// 7. JWT Authentication & Authorization (Dual Schemes: InternalJwt + ClerkJwt)
+const string InternalScheme = "InternalJwt";
+const string ClerkScheme = "ClerkJwt";
+
+// TODO: bắt buộc set JWT_SECRET thật ở production
+var jwtSecret = builder.Configuration["JWT_SECRET"] 
+    ?? Environment.GetEnvironmentVariable("JWT_SECRET") 
+    ?? "super_secret_key_for_dev_1234567890";
+
+var clerkAuthority = builder.Configuration["CLERK_FRONTEND_API_URL"] 
+    ?? Environment.GetEnvironmentVariable("CLERK_FRONTEND_API_URL");
+
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultAuthenticateScheme = InternalScheme;
+    options.DefaultChallengeScheme = InternalScheme;
 })
-.AddJwtBearer(options =>
+.AddJwtBearer(InternalScheme, options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
     {
@@ -89,6 +100,15 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
         ClockSkew = TimeSpan.Zero
+    };
+})
+.AddJwtBearer(ClerkScheme, options =>
+{
+    options.Authority = clerkAuthority;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateAudience = false,
+        NameClaimType = "sub"
     };
 });
 builder.Services.AddAuthorization();
