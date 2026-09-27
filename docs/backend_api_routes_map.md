@@ -107,6 +107,7 @@ Tài liệu này tổng hợp toàn bộ các API Endpoints, Contract giữa cá
 |:---:|---|:---:|---|
 | `POST` | `/api/auth/register` | **Public** | Đăng ký tài khoản mới (Hash mật khẩu `PasswordHasher<User>`, cấp quyền Customer) |
 | `POST` | `/api/auth/login` | **Public** | Đăng nhập Email/Password -> Trả chuỗi JWT Token |
+| `POST` | `/api/auth/clerk-sync` | **Clerk Authenticated** | Đồng bộ tài khoản Clerk SSO: xác thực Clerk JWT, auto-link hoặc tạo User mới (`auth_provider = 'clerk'`), trả chuỗi JWT nội bộ |
 | `GET` | `/api/auth/me` | **Customer** | Lấy thông tin profile người dùng đang đăng nhập từ Token Claims |
 | `PUT` | `/api/users/profile` | **Customer** | Cập nhật thông tin cá nhân (Họ tên, số điện thoại, avatar) |
 | `PUT` | `/api/users/change-password` | **Customer** | Đổi mật khẩu tài khoản (`PasswordHasher<User>`) |

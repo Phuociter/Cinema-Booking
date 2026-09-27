@@ -4,6 +4,7 @@ import { dummyShowsData, dummyTrailers, dummyDateTimeData } from '../assets/asse
 import { Star, Clock, MapPin, Ticket, Play, Loader2, Heart, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import BlurCircle from '../components/BlurCircle';
 import MovieCard from '../components/MovieCard';
+import CityShowtimeModal from '../components/booking/CityShowtimeModal';
 
 const MovieDetail = () => {
   const { id } = useParams();
@@ -14,6 +15,7 @@ const MovieDetail = () => {
   const [relatedMovies, setRelatedMovies] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
   const [availableDates, setAvailableDates] = useState([]);
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
 
   // Fetch movie data based on ID and check favorite status
   useEffect(() => {
@@ -163,19 +165,8 @@ const MovieDetail = () => {
               </p>
               <div className="flex flex-wrap gap-4">
                 <button
-                  onClick={() => {
-                    if (currentShowtimes.length > 0 && currentShowtimes[0].available) {
-                      navigate(`/movies/book/${movie._id}/${currentShowtimes[0].id}`, {
-                        state: {
-                          selectedDate,
-                          selectedTime: currentShowtimes[0].time
-                        }
-                      });
-                    } else {
-                      alert('Chưa có suất chiếu khả dụng cho ngày này. Vui lòng chọn ngày khác.');
-                    }
-                  }}
-                  className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2"
+                  onClick={() => setIsBookingModalOpen(true)}
+                  className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2 cursor-pointer"
                 >
                   <Ticket className="w-5 h-5" /> Đặt Vé Ngay
                 </button>
@@ -363,6 +354,20 @@ const MovieDetail = () => {
             ))}
           </div>
         </div>
+        {/* POPUP MODAL ĐẶT VÉ THEO 34 TỈNH THÀNH (DÙNG CHUNG) */}
+        {movie && (
+          <CityShowtimeModal
+            isOpen={isBookingModalOpen}
+            onClose={() => setIsBookingModalOpen(false)}
+            movie={{
+              id: movie.id || movie._id,
+              title: movie.title,
+              posterUrl: movie.poster_path ? 'https://image.tmdb.org/t/p/original' + movie.poster_path : (movie.posterUrl || 'https://picsum.photos/400/600'),
+              durationMin: 90,
+              ageRating: 'P'
+            }}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,16 +1,1 @@
-using MovieBooking.Service.DTOs;
-
-namespace MovieBooking.Service.Interfaces;
-
-public interface IMovieService
-{
-    Task<(List<MovieDto> Items, int TotalItems)> GetAllMoviesAsync(
-        string? status,
-        string? search,
-        int page,
-        int pageSize);
-
-    Task<MovieDto?> GetMovieByIdAsync(Guid id);
-
-    Task<List<string>> GetGenresAsync();
-}
+// File này để trống để tránh lỗi CS0104 Ambiguous Reference giữa MovieBooking.Service.Interfaces và MovieBooking.Service.Services

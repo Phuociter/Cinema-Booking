@@ -36,149 +36,16 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Table mappings
-        modelBuilder.Entity<Movie>().ToTable("movies");
-        modelBuilder.Entity<Genre>().ToTable("genres");
         modelBuilder.Entity<MovieGenre>().ToTable("moviegenres");
-
-        modelBuilder.Entity<Director>().ToTable("directors");
         modelBuilder.Entity<MovieDirector>().ToTable("moviedirectors");
-
-        modelBuilder.Entity<Actor>().ToTable("actors");
         modelBuilder.Entity<MovieActor>().ToTable("movieactors");
+        modelBuilder.Entity<UserRole>().ToTable("userroles");
 
-        // Movie columns
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.Id)
-            .HasColumnName("id");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.Title)
-            .HasColumnName("title");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.OriginalTitle)
-            .HasColumnName("original_title");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.Overview)
-            .HasColumnName("overview");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.DurationMin)
-            .HasColumnName("duration_min");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.AgeRating)
-            .HasColumnName("age_rating");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.PosterUrl)
-            .HasColumnName("poster_url");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.BackdropUrl)
-            .HasColumnName("backdrop_url");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.TrailerUrl)
-            .HasColumnName("trailer_url");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.ReleaseDate)
-            .HasColumnName("release_date");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.RatingScore)
-            .HasColumnName("rating_score");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.Status)
-            .HasColumnName("status");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.CreatedAt)
-            .HasColumnName("created_at");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.UpdatedAt)
-            .HasColumnName("updated_at");
-
-        modelBuilder.Entity<Movie>()
-            .Property(x => x.DeletedAt)
-            .HasColumnName("deleted_at");
-
-        // Genre columns
-        modelBuilder.Entity<Genre>()
-            .Property(x => x.Id)
-            .HasColumnName("id");
-
-        modelBuilder.Entity<Genre>()
-            .Property(x => x.Name)
-            .HasColumnName("name");
-        // Director columns
-        modelBuilder.Entity<Director>()
-            .Property(x => x.Id)
-            .HasColumnName("id");
-
-        modelBuilder.Entity<Director>()
-            .Property(x => x.Name)
-            .HasColumnName("name");
-
-        modelBuilder.Entity<Director>()
-            .Property(x => x.PhotoUrl)
-            .HasColumnName("photo_url");
-
-        // Actor columns
-        modelBuilder.Entity<Actor>()
-            .Property(x => x.Id)
-            .HasColumnName("id");
-
-        modelBuilder.Entity<Actor>()
-            .Property(x => x.Name)
-            .HasColumnName("name");
-
-        modelBuilder.Entity<Actor>()
-            .Property(x => x.ProfilePath)
-            .HasColumnName("profile_path");
-
-        // Composite keys
-        modelBuilder.Entity<MovieGenre>()
-            .HasKey(x => new { x.MovieId, x.GenreId });
-
-        modelBuilder.Entity<MovieDirector>()
-            .HasKey(x => new { x.MovieId, x.DirectorId });
-
-        modelBuilder.Entity<MovieActor>()
-            .HasKey(x => new { x.MovieId, x.ActorId });
-
-        modelBuilder.Entity<UserRole>()
-            .HasKey(x => new { x.UserId, x.RoleId });
-
-        // Foreign key column mappings
-        modelBuilder.Entity<MovieGenre>()
-            .Property(x => x.MovieId)
-            .HasColumnName("movie_id");
-
-        modelBuilder.Entity<MovieGenre>()
-            .Property(x => x.GenreId)
-            .HasColumnName("genre_id");
-
-        modelBuilder.Entity<MovieDirector>()
-            .Property(x => x.MovieId)
-            .HasColumnName("movie_id");
-
-        modelBuilder.Entity<MovieDirector>()
-            .Property(x => x.DirectorId)
-            .HasColumnName("director_id");
-
-        modelBuilder.Entity<MovieActor>()
-            .Property(x => x.MovieId)
-            .HasColumnName("movie_id");
-
-        modelBuilder.Entity<MovieActor>()
-            .Property(x => x.ActorId)
-            .HasColumnName("actor_id");
+        // Composite Keys
+        modelBuilder.Entity<MovieGenre>().HasKey(x => new { x.MovieId, x.GenreId });
+        modelBuilder.Entity<MovieDirector>().HasKey(x => new { x.MovieId, x.DirectorId });
+        modelBuilder.Entity<MovieActor>().HasKey(x => new { x.MovieId, x.ActorId });
+        modelBuilder.Entity<UserRole>().HasKey(x => new { x.UserId, x.RoleId });
 
         // Unique Constraints & Indexes
         modelBuilder.Entity<Seat>()
@@ -277,26 +144,34 @@ public class AppDbContext : DbContext
             .Property(p => p.Metadata)
             .HasColumnType("jsonb");
 
-        // Global Query Filters
-        modelBuilder.Entity<User>()
-            .HasQueryFilter(x => x.DeletedAt == null);
+        // Global Query Filters for the 7 Soft-Deletable entities
+        modelBuilder.Entity<User>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Movie>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Cinema>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Auditorium>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Snack>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<CinemaSnack>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<SeatType>().HasQueryFilter(x => x.DeletedAt == null);
 
-        modelBuilder.Entity<Movie>()
-            .HasQueryFilter(x => x.DeletedAt == null);
+        // Chuẩn hóa tên bảng sang lowercase và tên cột sang snake_case tương thích PostgreSQL
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            var tableName = entity.GetTableName();
+            if (!string.IsNullOrEmpty(tableName))
+            {
+                entity.SetTableName(tableName.ToLower());
+            }
 
-        modelBuilder.Entity<Cinema>()
-            .HasQueryFilter(x => x.DeletedAt == null);
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
+    }
 
-        modelBuilder.Entity<Auditorium>()
-            .HasQueryFilter(x => x.DeletedAt == null);
-
-        modelBuilder.Entity<Snack>()
-            .HasQueryFilter(x => x.DeletedAt == null);
-
-        modelBuilder.Entity<CinemaSnack>()
-            .HasQueryFilter(x => x.DeletedAt == null);
-
-        modelBuilder.Entity<SeatType>()
-            .HasQueryFilter(x => x.DeletedAt == null);
+    private static string ToSnakeCase(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        return System.Text.RegularExpressions.Regex.Replace(input, @"([a-z0-9])([A-Z])", "$1_$2").ToLower();
     }
 }
