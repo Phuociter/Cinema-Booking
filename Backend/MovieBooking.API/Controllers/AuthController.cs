@@ -141,11 +141,61 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> ClerkSync()
     {
         var clerkUserId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(clerkUserId))
+            return Unauthorized(new { message = "Token Clerk không hợp lệ: thiếu sub claim" });
+
         var email = User.FindFirstValue("email") ?? User.FindFirstValue(ClaimTypes.Email);
         var fullName = User.FindFirstValue("name") ?? User.FindFirstValue(ClaimTypes.Name);
         var emailVerified = User.FindFirstValue("email_verified");
 
-        if (string.IsNullOrEmpty(clerkUserId) || string.IsNullOrEmpty(email))
+        // Nếu token Clerk không có sẵn claim email, Backend gọi Clerk API theo sub
+        if (string.IsNullOrEmpty(email))
+        {
+            var clerkSecretKey = _configuration["CLERK_SECRET_KEY"] 
+                ?? Environment.GetEnvironmentVariable("CLERK_SECRET_KEY");
+
+            if (string.IsNullOrEmpty(clerkSecretKey))
+                return Unauthorized(new { message = "Chưa cấu hình CLERK_SECRET_KEY để xác thực email người dùng" });
+
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", clerkSecretKey);
+            var response = await httpClient.GetAsync($"https://api.clerk.com/v1/users/{clerkUserId}");
+            if (!response.IsSuccessStatusCode)
+                return Unauthorized(new { message = "Không thể lấy thông tin người dùng từ Clerk Backend API" });
+
+            var userJson = await response.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(userJson);
+            var root = doc.RootElement;
+            var primaryEmailId = root.TryGetProperty("primary_email_address_id", out var pId) ? pId.GetString() : null;
+
+            if (root.TryGetProperty("email_addresses", out var emails) && emails.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var item in emails.EnumerateArray())
+                {
+                    var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                    var address = item.TryGetProperty("email_address", out var addrProp) ? addrProp.GetString() : null;
+                    var isVerified = item.TryGetProperty("verification", out var vProp) 
+                        && vProp.TryGetProperty("status", out var sProp) 
+                        && sProp.GetString() == "verified";
+
+                    if (isVerified && (id == primaryEmailId || string.IsNullOrEmpty(email)))
+                    {
+                        email = address;
+                        emailVerified = "true";
+                        if (id == primaryEmailId) break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(fullName))
+            {
+                var firstName = root.TryGetProperty("first_name", out var f) ? f.GetString() : "";
+                var lastName = root.TryGetProperty("last_name", out var l) ? l.GetString() : "";
+                fullName = $"{firstName} {lastName}".Trim();
+            }
+        }
+
+        if (string.IsNullOrEmpty(email))
             return Unauthorized(new { message = "Token Clerk không hợp lệ hoặc thiếu thông tin email" });
 
         if (!string.Equals(emailVerified, "true", StringComparison.OrdinalIgnoreCase))
@@ -246,7 +296,11 @@ public class AuthController : ControllerBase
 
     private string GenerateJwtToken(User user, IReadOnlyCollection<string> roles)
     {
-        var jwtSecret = _configuration["JWT_SECRET"] ?? Environment.GetEnvironmentVariable("JWT_SECRET") ?? "super_secret_key_for_dev_1234567890";
+        var jwtSecret = _configuration["JWT_SECRET"] ?? Environment.GetEnvironmentVariable("JWT_SECRET");
+        if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
+        {
+            throw new InvalidOperationException("CẤU HÌNH BẢO MẬT KHÔNG HỢP LỆ: Biến môi trường JWT_SECRET chưa được thiết lập hoặc ngắn hơn 32 ký tự.");
+        }
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -264,6 +318,7 @@ public class AuthController : ControllerBase
             issuer: null,
             audience: null,
             claims: claims,
+            notBefore: DateTime.UtcNow.AddMinutes(-1),
             expires: DateTime.UtcNow.AddHours(24),
             signingCredentials: creds);
 

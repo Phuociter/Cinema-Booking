@@ -237,8 +237,18 @@ SELECT
     ('00000009-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid,
     (ARRAY['Bắp Rang Bơ','Combo Nước Ngọt','Snack Khoai Tây','Hot Dog Phô Mai','Kẹo Dẻo Trái Cây','Nachos Sốt Phô Mai','Trà Sữa Trân Châu','Nước Ngọt Có Gas','Bánh Mì Que','Pop Corn Caramel'])[(n % 10) + 1]
         || ' - ' ||
-    (ARRAY['Nhỏ','Vừa','Lớn','Đặc Biệt','Combo Đôi'])[(n % 5) + 1],
-    'https://picsum.photos/seed/snack-' || n || '/400/400',
+    CASE (n % 10) + 1
+        WHEN 1 THEN 'https://images.unsplash.com/photo-1585647347384-2593bc35786b?w=400'
+        WHEN 2 THEN 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=400'
+        WHEN 3 THEN 'https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=400'
+        WHEN 4 THEN 'https://images.unsplash.com/photo-1619740455993-9e612b1af08a?w=400'
+        WHEN 5 THEN 'https://images.unsplash.com/photo-1582058091505-f87a2e55a40f?w=400'
+        WHEN 6 THEN 'https://images.unsplash.com/photo-1513456852971-30c0b8199d4d?w=400'
+        WHEN 7 THEN 'https://images.unsplash.com/photo-1558857563-b371033873b8?w=400'
+        WHEN 8 THEN 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=400'
+        WHEN 9 THEN 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400'
+        ELSE 'https://images.unsplash.com/photo-1512149177596-f817c7ef5d4c?w=400'
+    END,
     'Món ăn vặt yêu thích khi xem phim, thơm ngon và tiện lợi.'
 FROM generate_series(1, 100) AS n;
 
@@ -280,6 +290,20 @@ VALUES (
 
 INSERT INTO UserRoles (user_id, role_id)
 SELECT '0000000c-0000-0000-0000-000000000000'::uuid, id FROM Roles WHERE name = 'Admin';
+
+-- Staff account — email: staff@example.com  password: 123456
+INSERT INTO Users (id, full_name, email, phone, password_hash, avatar_url)
+VALUES (
+    '0000000c-0000-0000-0000-000000000099'::uuid,
+    'Nhân Viên Quầy Rạp',
+    'staff@example.com',
+    '0901234567',
+    crypt('123456', gen_salt('bf')),
+    'https://i.pravatar.cc/300?img=12'
+);
+
+INSERT INTO UserRoles (user_id, role_id)
+SELECT '0000000c-0000-0000-0000-000000000099'::uuid, id FROM Roles WHERE name = 'Staff';
 
 -- 20 demo customer accounts — khachhang1@example.com..khachhang20@example.com, password: 123456
 INSERT INTO Users (id, full_name, email, phone, password_hash, avatar_url)

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import MovieCard from '../components/MovieCard';
 import { 
   Search, 
@@ -30,14 +31,22 @@ const mapMovie = (movie) => ({
 });
 
 const Movies = () => {
+  const [searchParams] = useSearchParams();
   const [movies, setMovies] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedGenre, setSelectedGenre] = useState('all');
   const [sortBy, setSortBy] = useState('latest');
   const [viewMode, setViewMode] = useState('grid');
   const [showFilters, setShowFilters] = useState(false);
   const [filteredMovies, setFilteredMovies] = useState([]);
+
+  useEffect(() => {
+    const s = searchParams.get('search');
+    if (s !== null) {
+      setSearchQuery(s);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const loadMovies = async () => {
@@ -87,7 +96,7 @@ const Movies = () => {
         result.sort((a, b) => a.title?.localeCompare(b.title));
         break;
       case 'rating':
-        result.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+        result.sort((a, b) => (b.ratingScore || b.vote_average || 0) - (a.ratingScore || a.vote_average || 0));
         break;
       case 'latest':
       default:
@@ -98,8 +107,11 @@ const Movies = () => {
     setFilteredMovies(result);
   }, [movies, searchQuery, selectedGenre, sortBy]);
 
-  // Get unique genres
-  const genres = ['all', ...new Set(movies.map(movie => movie.genre).filter(Boolean))];
+  // Get unique individual genres
+  const genres = [
+    'all',
+    ...new Set(movies.flatMap(movie => movie.genres?.map(g => g.name || g) || []).filter(Boolean))
+  ];
 
   const sortOptions = [
     { value: 'latest', label: 'Mới nhất' },
@@ -154,7 +166,7 @@ const Movies = () => {
           <div className="flex items-center justify-center gap-8 mt-8 text-sm">
             <div className="flex items-center gap-2 text-gray-300">
               <Star className="w-4 h-4 text-yellow-500" />
-              <span>{movies.length} bộ phim</span>
+              <span>Hàng loạt bộ phim</span>
             </div>
             <div className="flex items-center gap-2 text-gray-300">
               <Clock className="w-4 h-4 text-blue-500" />
@@ -217,7 +229,7 @@ const Movies = () => {
               >
                 <option value="all" className="bg-gray-800">Tất cả thể loại</option>
                 {genres.filter(genre => genre !== 'all').map(genre => (
-                  <option key={genre} value={genre} className="bg-gray-800 capitalize">
+                  <option key={genre} value={genre} className="bg-gray-800">
                     {genre}
                   </option>
                 ))}
@@ -240,7 +252,8 @@ const Movies = () => {
               </select>
             </div>
 
-            {/* View Mode */}
+            {/* View Mode - Tạm ẩn theo yêu cầu */}
+            {/* 
             <div className="flex-shrink-0">
               <label className="block text-gray-300 text-sm font-medium mb-2">Hiển thị</label>
               <div className="flex bg-white/5 rounded-lg p-1">
@@ -266,6 +279,7 @@ const Movies = () => {
                 </button>
               </div>
             </div>
+            */}
 
             {/* Clear Filters */}
             {(searchQuery || selectedGenre !== 'all' || sortBy !== 'latest') && (

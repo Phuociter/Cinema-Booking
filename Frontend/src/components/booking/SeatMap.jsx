@@ -2,12 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useShowtimes } from '../../api';
 import { Loader2, AlertCircle, Lock } from 'lucide-react';
 
-/**
- * Component: SeatMap.jsx
- * Người sở hữu: Dev C
- * Trách nhiệm: Render sơ đồ ghế động, timer 5 phút giữ ghế, gọi API POST /api/showtimes/{id}/hold-seats
- */
-
 const AUDITORIUM_ROWS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 const SEAT_TYPE_STYLES = {
@@ -17,10 +11,12 @@ const SEAT_TYPE_STYLES = {
 };
 const RESERVED_STYLE = 'bg-slate-800/80 text-slate-600 border-slate-700/60 cursor-not-allowed opacity-60';
 
-function getSeatStyle(seat) {
-  return seat.status === 'reserved'
-    ? RESERVED_STYLE
-    : SEAT_TYPE_STYLES[seat.seatTypeName] ?? SEAT_TYPE_STYLES.Standard;
+function getSeatStyle(seat, isSelected) {
+  if (seat.status === 'reserved') return RESERVED_STYLE;
+  if (isSelected) {
+    return 'bg-red-500/30 text-red-200 border-red-500 ring-2 ring-red-500/60 shadow-lg shadow-red-500/30 scale-105 cursor-pointer font-bold';
+  }
+  return `${SEAT_TYPE_STYLES[seat.seatTypeName] ?? SEAT_TYPE_STYLES.Standard} cursor-pointer hover:border-white/50 hover:scale-105 active:scale-95`;
 }
 
 function groupSeatsByRow(seats) {
@@ -34,11 +30,14 @@ function groupSeatsByRow(seats) {
   return map;
 }
 
-const SeatMap = ({ showtimeId, onSeatSelected }) => {
-  // TODO (Tuần 3 - [W3-DEVC-FE]): Kích hoạt callback onSeatSelected(seat) và logic tạm giữ ghế (Redis TTL 300s) khi người dùng click chọn ghế
+const SeatMap = ({ showtimeId, selectedSeats: externalSelectedSeats, onSeatSelected, maxSeats = 8 }) => {
   const [seats, setSeats] = useState([]);
+  const [internalSelectedSeats, setInternalSelectedSeats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const isControlled = externalSelectedSeats !== undefined;
+  const selectedSeats = isControlled ? externalSelectedSeats : internalSelectedSeats;
 
   useEffect(() => {
     if (!showtimeId) {
@@ -63,6 +62,29 @@ const SeatMap = ({ showtimeId, onSeatSelected }) => {
   }, [showtimeId]);
 
   const seatsByRow = useMemo(() => groupSeatsByRow(seats), [seats]);
+
+  const handleSeatClick = (seat) => {
+    if (seat.status === 'reserved') return;
+
+    const isSelected = selectedSeats.some((s) => s.id === seat.id);
+    let updated;
+    if (isSelected) {
+      updated = selectedSeats.filter((s) => s.id !== seat.id);
+    } else {
+      if (selectedSeats.length >= maxSeats) {
+        alert(`Chỉ được chọn tối đa ${maxSeats} ghế cho một lần đặt vé.`);
+        return;
+      }
+      updated = [...selectedSeats, seat];
+    }
+
+    if (!isControlled) {
+      setInternalSelectedSeats(updated);
+    }
+    if (onSeatSelected) {
+      onSeatSelected(updated);
+    }
+  };
 
   if (loading) {
     return (
@@ -91,39 +113,44 @@ const SeatMap = ({ showtimeId, onSeatSelected }) => {
         <p className="text-slate-400 text-xs md:text-sm mt-1">Phòng chiếu tiêu chuẩn 48 ghế (6 hàng × 8 cột)</p>
       </div>
 
-      {/* Màn hình chiếu phim mô phỏng */}
+      {/* Màn hình chiếu phim */}
       <div className="max-w-xl mx-auto mb-10">
         <div className="h-2 w-full bg-gradient-to-r from-transparent via-red-500 to-transparent rounded-full shadow-[0_0_20px_rgba(239,68,68,0.6)]" />
         <p className="text-center text-[11px] uppercase tracking-[0.3em] text-slate-500 mt-2 font-medium">Màn Hình Chiếu</p>
       </div>
 
-      {/* Ma trận 48 ghế */}
+      {/* Ma trận ghế */}
       <div className="max-w-2xl mx-auto space-y-3">
         {AUDITORIUM_ROWS.map((rowLabel) => (
           <div key={rowLabel} className="flex items-center justify-center gap-2 md:gap-3">
-            {/* Nhãn hàng bên trái */}
             <span className="w-5 text-center font-bold text-xs text-slate-400 select-none">
               {rowLabel}
             </span>
 
-            {/* Danh sách ghế trong hàng */}
             <div className="flex items-center gap-1.5 md:gap-2">
-              {(seatsByRow[rowLabel] ?? []).map((seat) => (
-                <div
-                  key={seat.id}
-                  title={`${seat.seatCode} (${seat.seatTypeName}) - ${seat.totalPrice?.toLocaleString('vi-VN')}đ - Trạng thái: ${seat.status === 'reserved' ? 'Đã đặt' : 'Còn trống'}`}
-                  className={`relative w-8 h-8 md:w-10 md:h-10 rounded-lg border text-xs font-semibold flex items-center justify-center transition-all duration-200 select-none ${getSeatStyle(seat)}`}
-                >
-                  {seat.status === 'reserved' ? (
-                    <Lock className="w-3.5 h-3.5 text-slate-500" />
-                  ) : (
-                    seat.columnNumber
-                  )}
-                </div>
-              ))}
+              {(seatsByRow[rowLabel] ?? []).map((seat) => {
+                const isReserved = seat.status === 'reserved';
+                const isSelected = selectedSeats.some((s) => s.id === seat.id);
+
+                return (
+                  <button
+                    type="button"
+                    key={seat.id}
+                    disabled={isReserved}
+                    onClick={() => handleSeatClick(seat)}
+                    title={`${seat.seatCode} (${seat.seatTypeName}) - ${seat.totalPrice?.toLocaleString('vi-VN')}đ - Trạng thái: ${isReserved ? 'Đã đặt' : isSelected ? 'Đang chọn' : 'Còn trống'}`}
+                    className={`relative w-8 h-8 md:w-10 md:h-10 rounded-lg border text-xs font-semibold flex items-center justify-center transition-all duration-200 select-none ${getSeatStyle(seat, isSelected)}`}
+                  >
+                    {isReserved ? (
+                      <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    ) : (
+                      seat.columnNumber
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Nhãn hàng bên phải */}
             <span className="w-5 text-center font-bold text-xs text-slate-400 select-none">
               {rowLabel}
             </span>
@@ -132,7 +159,7 @@ const SeatMap = ({ showtimeId, onSeatSelected }) => {
       </div>
 
       {/* Chú thích loại ghế (Legend) */}
-      <div className="mt-8 pt-6 border-t border-white/10 flex flex-wrap items-center justify-center gap-4 md:gap-8 text-xs">
+      <div className="mt-8 pt-6 border-t border-white/10 flex flex-wrap items-center justify-center gap-4 md:gap-6 text-xs">
         <div className="flex items-center gap-2">
           <div className="w-5 h-5 rounded-md border border-slate-600/70 bg-slate-700/60" />
           <span className="text-slate-300">Thường (A - D)</span>
@@ -146,10 +173,14 @@ const SeatMap = ({ showtimeId, onSeatSelected }) => {
           <span className="text-pink-300">Ghế Đôi (F)</span>
         </div>
         <div className="flex items-center gap-2">
+          <div className="w-5 h-5 rounded-md border border-red-500 bg-red-500/30 flex items-center justify-center text-red-200 text-xs font-bold">1</div>
+          <span className="text-red-400 font-medium">Đang chọn</span>
+        </div>
+        <div className="flex items-center gap-2">
           <div className="w-5 h-5 rounded-md border border-slate-700/60 bg-slate-800/80 flex items-center justify-center">
             <Lock className="w-3 h-3 text-slate-500" />
           </div>
-          <span className="text-slate-500">Đã đặt (Reserved)</span>
+          <span className="text-slate-500">Đã đặt</span>
         </div>
       </div>
     </div>
