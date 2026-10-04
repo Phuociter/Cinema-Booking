@@ -19,6 +19,11 @@ export const useShowtimes = {
   getShowtimeSeats: async (showtimeId) => {
     return await axiosInstance.get(`/showtimes/${showtimeId}/seats`);
   },
+
+  // Giữ ghế tạm thời (5 phút qua Redis)
+  holdSeats: async (showtimeId, seatIds) => {
+    return await axiosInstance.post(`/showtimes/${showtimeId}/hold-seats`, { seatIds });
+  },
 };
 
 export default useShowtimes;

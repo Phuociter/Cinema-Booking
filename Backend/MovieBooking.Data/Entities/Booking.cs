@@ -10,6 +10,7 @@ public class Booking
     public string Status { get; set; } = "pending"; // pending, success, cancelled
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
 
     public ICollection<Ticket> Tickets { get; set; } = new List<Ticket>();
     public ICollection<BookingSnack> BookingSnacks { get; set; } = new List<BookingSnack>();

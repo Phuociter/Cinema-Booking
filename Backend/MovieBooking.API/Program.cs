@@ -12,8 +12,12 @@ using MovieBooking.Service.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Tự động nạp biến môi trường từ file .env nếu có
+LoadDotEnv(builder);
+
 // 1. Add Controllers & Swagger with JWT Bearer
 builder.Services.AddControllers();
+builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -72,15 +76,19 @@ builder.Services.AddSingleton<IRedisService, RedisService>();
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
 builder.Services.AddScoped<ISnackService, SnackService>();
+builder.Services.AddScoped<ICinemaService, CinemaService>();
 
 // 7. JWT Authentication & Authorization (Dual Schemes: InternalJwt + ClerkJwt)
 const string InternalScheme = "InternalJwt";
 const string ClerkScheme = "ClerkJwt";
 
-// TODO: bắt buộc set JWT_SECRET thật ở production
 var jwtSecret = builder.Configuration["JWT_SECRET"] 
-    ?? Environment.GetEnvironmentVariable("JWT_SECRET") 
-    ?? "super_secret_key_for_dev_1234567890";
+    ?? Environment.GetEnvironmentVariable("JWT_SECRET");
+
+if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
+{
+    throw new InvalidOperationException("CẤU HÌNH BẢO MẬT KHÔNG HỢP LỆ: Biến môi trường JWT_SECRET chưa được thiết lập hoặc ngắn hơn 32 ký tự. Vui lòng cấu hình JWT_SECRET trong file .env hoặc appsettings.json.");
+}
 
 var clerkAuthority = builder.Configuration["CLERK_FRONTEND_API_URL"] 
     ?? Environment.GetEnvironmentVariable("CLERK_FRONTEND_API_URL");
@@ -99,7 +107,7 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
-        ClockSkew = TimeSpan.Zero
+        ClockSkew = TimeSpan.FromMinutes(1)
     };
 })
 .AddJwtBearer(ClerkScheme, options =>
@@ -121,7 +129,19 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
+        policy.SetIsOriginAllowed(origin =>
+            {
+                if (string.IsNullOrEmpty(origin)) return false;
+                try
+                {
+                    var uri = new Uri(origin);
+                    return uri.Host == "localhost" || allowedOrigins.Contains(origin);
+                }
+                catch
+                {
+                    return false;
+                }
+            })
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -173,4 +193,34 @@ static string[] ResolveAllowedOrigins(IConfiguration configuration)
 
     // Fallback cuối cùng: cổng dev mặc định
     return ["http://localhost:3001"];
+}
+
+static void LoadDotEnv(WebApplicationBuilder builder)
+{
+    var candidates = new[]
+    {
+        Path.Combine(builder.Environment.ContentRootPath, ".env"),
+        Path.Combine(builder.Environment.ContentRootPath, "..", ".env"),
+        Path.Combine(builder.Environment.ContentRootPath, "..", "..", ".env")
+    };
+
+    foreach (var path in candidates)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath)) continue;
+
+        foreach (var line in File.ReadAllLines(fullPath))
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#") || !trimmed.Contains('=')) continue;
+            var parts = trimmed.Split('=', 2);
+            var key = parts[0].Trim();
+            var val = parts[1].Trim().Trim('\"', '\'');
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(key)))
+            {
+                Environment.SetEnvironmentVariable(key, val);
+            }
+            builder.Configuration[key] = val;
+        }
+    }
 }
