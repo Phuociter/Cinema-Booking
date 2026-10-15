@@ -139,7 +139,7 @@ CREATE TABLE Showtimes (
         EXCLUDE USING gist (
             auditorium_id WITH =,
             tstzrange(start_time, end_time) WITH &&
-        )
+        ) WHERE (status <> 'cancelled')
 );
 
 CREATE TABLE ShowtimeSeats (

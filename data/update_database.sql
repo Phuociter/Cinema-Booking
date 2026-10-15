@@ -86,6 +86,30 @@ WHERE u.email = 'staff@example.com' AND r.name = 'Staff'
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
+-- PHẦN 0.1: CẬP NHẬT RÀNG BUỘC SUẤT CHIẾU & ĐỒNG BỘ TRẠNG THÁI GHẾ ĐÃ BÁN
+-- ============================================================
+
+-- 1. Nâng cấp ràng buộc chống trùng lịch chiếu (loại trừ các suất đã bị hủy)
+ALTER TABLE showtimes DROP CONSTRAINT IF EXISTS no_overlapping_showtimes;
+ALTER TABLE showtimes 
+ADD CONSTRAINT no_overlapping_showtimes 
+EXCLUDE USING gist (
+    auditorium_id WITH =,
+    tstzrange(start_time, end_time) WITH &&
+) WHERE (status <> 'cancelled');
+
+-- 2. Đồng bộ trạng thái reserved cho tất cả ghế đã có vé thuộc đơn hàng thành công
+UPDATE showtimeseats 
+SET status = 'reserved' 
+WHERE status = 'available' 
+  AND id IN (
+      SELECT t.showtime_seat_id 
+      FROM tickets t 
+      JOIN bookings b ON b.id = t.booking_id 
+      WHERE b.status = 'success'
+  );
+
+-- ============================================================
 -- PHẦN 1: CHUẨN HÓA FONT TIẾNG VIỆT UTF-8
 -- ============================================================
 
