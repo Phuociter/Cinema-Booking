@@ -147,7 +147,11 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
-
+using (var scope = builder.Services.BuildServiceProvider().CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
 var app = builder.Build();
 
 // Configure HTTP request pipeline

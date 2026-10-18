@@ -45,8 +45,10 @@ BEGIN
 END $$;
 
 -- 4. Đảm bảo đủ các Roles hệ thống (Customer, Staff, Admin)
-INSERT INTO Roles (name)
-VALUES ('Customer'), ('Staff'), ('Admin')
+INSERT INTO Roles (id, name)
+VALUES (gen_random_uuid(), 'Customer'), 
+       (gen_random_uuid(), 'Staff'), 
+       (gen_random_uuid(), 'Admin')
 ON CONFLICT (name) DO NOTHING;
 
 -- 5. Đảm bảo tài khoản Admin mẫu luôn tồn tại (admin@example.com / pass: admin)
