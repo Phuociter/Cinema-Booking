@@ -3,6 +3,9 @@ using MovieBooking.Service.Services;
 
 namespace MovieBooking.API.Controllers;
 
+using Microsoft.AspNetCore.Authorization;
+using MovieBooking.Service.DTOs;
+
 [ApiController]
 [Route("api")]
 public class CinemasController : ControllerBase
@@ -48,5 +51,56 @@ public class CinemasController : ControllerBase
         var seats = await _cinemaService.GetSeatsByAuditoriumIdAsync(id);
 
         return Ok(seats);
+    }
+        // POST /api/auditoriums
+    [HttpPost("auditoriums")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CreateAuditorium([FromBody] CreateAuditoriumRequest request)
+    {
+        var result = await _cinemaService.CreateAuditoriumAsync(request);
+
+        if (!result.Success)
+            return StatusCode(result.StatusCode, new { message = result.Error });
+
+        return CreatedAtAction(nameof(GetSeats), new { id = result.Data!.Id }, result.Data);
+    }
+
+    // PUT /api/auditoriums/{id}/seats/layout
+    [HttpPut("auditoriums/{id:guid}/seats/layout")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateSeatLayout(Guid id, [FromBody] UpdateSeatLayoutRequest request)
+    {
+        var result = await _cinemaService.UpdateSeatLayoutAsync(id, request);
+
+        if (!result.Success)
+            return StatusCode(result.StatusCode, new { message = result.Error });
+
+        return Ok(new { message = "Cập nhật loại ghế thành công", updated = result.Data });
+    }
+
+    // PUT /api/auditoriums/{id}
+    [HttpPut("auditoriums/{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateAuditorium(Guid id, [FromBody] UpdateAuditoriumRequest request)
+    {
+        var result = await _cinemaService.UpdateAuditoriumAsync(id, request);
+
+        if (!result.Success)
+            return StatusCode(result.StatusCode, new { message = result.Error });
+
+        return Ok(result.Data);
+    }
+
+    // DELETE /api/auditoriums/{id}
+    [HttpDelete("auditoriums/{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeleteAuditorium(Guid id)
+    {
+        var result = await _cinemaService.DeleteAuditoriumAsync(id);
+
+        if (!result.Success)
+            return StatusCode(result.StatusCode, new { message = result.Error });
+
+        return NoContent();
     }
 }
