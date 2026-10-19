@@ -33,3 +33,24 @@ public class ShowtimeSeatDto
     public decimal TotalPrice { get; set; }
     public string Status { get; set; } = "available"; // available, reserved
 }
+
+public class HoldSeatsRequest
+{
+    public List<Guid> SeatIds { get; set; } = new();
+}
+
+public class HoldSeatsResponse
+{
+    public string HoldToken { get; set; } = string.Empty;
+    public DateTime ExpiresAt { get; set; }
+    public List<Guid> SeatIds { get; set; } = new();
+}
+
+public class HoldTokenData
+{
+    public Guid UserId { get; set; }
+    public Guid ShowtimeId { get; set; }
+    public List<Guid> SeatIds { get; set; } = new();
+    public List<Guid> ShowtimeSeatIds { get; set; } = new();
+    public DateTime ExpiresAt { get; set; }
+}

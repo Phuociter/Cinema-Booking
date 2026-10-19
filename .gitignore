@@ -45,3 +45,7 @@ Thumbs.db
 # --- CodeGraph & Local Agent Artifacts ---
 .codegraph/
 .agents/
+
+# --- Database Backups & Large Dumps ---
+data/backup_before_clerk_migration_20260925_164253.sql
+*.sql.bak

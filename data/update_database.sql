@@ -44,6 +44,47 @@ BEGIN
     END IF;
 END $$;
 
+-- 4. Đảm bảo đủ các Roles hệ thống (Customer, Staff, Admin)
+INSERT INTO Roles (name)
+VALUES ('Customer'), ('Staff'), ('Admin')
+ON CONFLICT (name) DO NOTHING;
+
+-- 5. Đảm bảo tài khoản Admin mẫu luôn tồn tại (admin@example.com / pass: admin)
+INSERT INTO Users (id, full_name, email, phone, password_hash, avatar_url, auth_provider)
+SELECT 
+    '0000000c-0000-0000-0000-000000000000'::uuid,
+    'Quản Trị Viên',
+    'admin@example.com',
+    '0900000000',
+    crypt('admin', gen_salt('bf')),
+    'https://i.pravatar.cc/300?img=65',
+    'local'
+WHERE NOT EXISTS (SELECT 1 FROM Users WHERE email = 'admin@example.com');
+
+INSERT INTO UserRoles (user_id, role_id)
+SELECT u.id, r.id 
+FROM Users u, Roles r 
+WHERE u.email = 'admin@example.com' AND r.name = 'Admin'
+ON CONFLICT DO NOTHING;
+
+-- 6. Khởi tạo tài khoản Nhân Viên quầy rạp mẫu (staff@example.com / pass: 123456)
+INSERT INTO Users (id, full_name, email, phone, password_hash, avatar_url, auth_provider)
+SELECT 
+    '0000000c-0000-0000-0000-000000000099'::uuid,
+    'Nhân Viên Quầy Rạp',
+    'staff@example.com',
+    '0901234567',
+    crypt('123456', gen_salt('bf')),
+    'https://i.pravatar.cc/300?img=12',
+    'local'
+WHERE NOT EXISTS (SELECT 1 FROM Users WHERE email = 'staff@example.com');
+
+INSERT INTO UserRoles (user_id, role_id)
+SELECT u.id, r.id 
+FROM Users u, Roles r 
+WHERE u.email = 'staff@example.com' AND r.name = 'Staff'
+ON CONFLICT DO NOTHING;
+
 -- ============================================================
 -- PHẦN 1: CHUẨN HÓA FONT TIẾNG VIỆT UTF-8
 -- ============================================================
@@ -76,6 +117,35 @@ FROM (
   FROM movies
 ) sub
 WHERE m.id = sub.id;
+
+-- 2b. Bảng Directors (100 đạo diễn)
+UPDATE directors d
+SET name = 
+    (ARRAY['Nguyễn','Trần','Lê','Phạm','Hoàng','Huỳnh','Phan','Vũ','Võ','Đặng','Bùi','Đỗ','Hồ','Ngô','Dương'])[((sub.n-1)/15)::int % 15 + 1]
+    || ' ' ||
+    (ARRAY['Văn An','Thị Bình','Minh Châu','Quốc Dũng','Thu Hà','Hoàng Long','Ngọc Mai','Tuấn Nam','Thanh Phong','Kim Quyên','Đức Sơn','Bảo Trâm','Việt Trung','Hải Yến','Xuân Nghi'])[(sub.n-1) % 15 + 1]
+FROM (
+  SELECT id, substring(id::text from 25)::int AS n
+  FROM directors
+) sub
+WHERE d.id = sub.id;
+
+-- 2c. Bảng Actors (100 diễn viên)
+UPDATE actors a
+SET name = 
+    (ARRAY['Nguyễn','Trần','Lê','Phạm','Hoàng','Huỳnh','Phan','Vũ','Võ','Đặng','Bùi','Đỗ','Hồ','Ngô','Dương'])[((sub.n-1)/15)::int % 15 + 1]
+    || ' ' ||
+    (ARRAY['Gia Bảo','Khánh Chi','Duy Khang','Mỹ Duyên','Anh Khoa','Ngọc Lan','Bá Lộc','Thùy Linh','Hữu Nghĩa','Diễm My','Trọng Phúc','Cẩm Tú','Nhật Vy','Thế Vinh','Yến Nhi'])[(sub.n-1) % 15 + 1]
+FROM (
+  SELECT id, substring(id::text from 25)::int AS n
+  FROM actors
+) sub
+WHERE a.id = sub.id;
+
+-- 2d. Bảng MovieActors (Tên nhân vật)
+UPDATE movieactors 
+SET character_name = REPLACE(character_name, 'Nh?n v?t', 'Nhân vật') 
+WHERE character_name LIKE 'Nh?n v?t%';
 
 -- 3. Bảng Cinemas (100 cụm rạp phân bổ phủ kín 34 Tỉnh / Thành phố)
 UPDATE cinemas c
@@ -135,12 +205,24 @@ FROM (
 ) sub
 WHERE a.id = sub.id;
 
--- 5. Bảng Snacks (100 món bắp nước)
+-- 5. Bảng Snacks (100 món bắp nước kèm ảnh Unsplash rạp phim chuẩn)
 UPDATE snacks s
 SET
   name = (ARRAY['Bắp Rang Bơ','Combo Nước Ngọt','Snack Khoai Tây','Hot Dog Phô Mai','Kẹo Dẻo Trái Cây','Nachos Sốt Phô Mai','Trà Sữa Trân Châu','Nước Ngọt Có Gas','Bánh Mì Que','Pop Corn Caramel'])[(sub.n % 10) + 1]
          || ' - ' ||
          (ARRAY['Nhỏ','Vừa','Lớn','Đặc Biệt','Combo Đôi'])[(sub.n % 5) + 1],
+  image_url = CASE (sub.n % 10) + 1
+      WHEN 1 THEN 'https://images.unsplash.com/photo-1585647347384-2593bc35786b?w=400'
+      WHEN 2 THEN 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=400'
+      WHEN 3 THEN 'https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=400'
+      WHEN 4 THEN 'https://images.unsplash.com/photo-1619740455993-9e612b1af08a?w=400'
+      WHEN 5 THEN 'https://images.unsplash.com/photo-1582058091505-f87a2e55a40f?w=400'
+      WHEN 6 THEN 'https://images.unsplash.com/photo-1513456852971-30c0b8199d4d?w=400'
+      WHEN 7 THEN 'https://images.unsplash.com/photo-1558857563-b371033873b8?w=400'
+      WHEN 8 THEN 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=400'
+      WHEN 9 THEN 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400'
+      ELSE 'https://images.unsplash.com/photo-1512149177596-f817c7ef5d4c?w=400'
+  END,
   description = 'Món ăn vặt yêu thích khi xem phim, thơm ngon và tiện lợi.'
 FROM (
   SELECT 
