@@ -544,4 +544,176 @@ public class CinemaService : ICinemaService
 
         return ServiceResult<bool>.Ok(true);
     }
+        // ============================================================
+    // ADMIN: CRUD CỤM RẠP & BÁO CÁO
+    // ============================================================
+
+    private static CinemaDto ToCinemaDto(Cinema c) => new()
+    {
+        Id = c.Id,
+        Name = c.Name,
+        Address = c.Address,
+        City = c.City,
+        Hotline = c.Hotline,
+        ImageUrl = c.ImageUrl
+    };
+
+    private static string? NullIfBlank(string? s) =>
+        string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static DateTime? ToUtc(DateTime? value)
+    {
+        if (!value.HasValue) return null;
+        var v = value.Value;
+        return v.Kind switch
+        {
+            DateTimeKind.Utc => v,
+            DateTimeKind.Local => v.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(v, DateTimeKind.Utc)
+        };
+    }
+
+    // POST /api/cinemas
+    public async Task<ServiceResult<CinemaDto>> CreateCinemaAsync(CreateCinemaRequest request)
+    {
+        var name = request.Name?.Trim() ?? string.Empty;
+        if (name.Length == 0)
+            return ServiceResult<CinemaDto>.Fail(400, "Tên rạp không được để trống");
+
+        var duplicated = await _context.Cinemas.AnyAsync(c =>
+            c.Name == name && c.City == NullIfBlank(request.City));
+        if (duplicated)
+            return ServiceResult<CinemaDto>.Fail(409, "Rạp cùng tên đã tồn tại trong thành phố này");
+
+        var cinema = new Cinema
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            Address = NullIfBlank(request.Address),
+            City = NullIfBlank(request.City),
+            Hotline = NullIfBlank(request.Hotline),
+            ImageUrl = NullIfBlank(request.ImageUrl),
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Cinemas.Add(cinema);
+        await _context.SaveChangesAsync();
+
+        return ServiceResult<CinemaDto>.Ok(ToCinemaDto(cinema));
+    }
+
+    // PUT /api/cinemas/{id}
+    public async Task<ServiceResult<CinemaDto>> UpdateCinemaAsync(Guid id, UpdateCinemaRequest request)
+    {
+        var cinema = await _context.Cinemas.FirstOrDefaultAsync(c => c.Id == id);
+        if (cinema == null)
+            return ServiceResult<CinemaDto>.Fail(404, "Không tìm thấy rạp");
+
+        var name = request.Name?.Trim() ?? string.Empty;
+        if (name.Length == 0)
+            return ServiceResult<CinemaDto>.Fail(400, "Tên rạp không được để trống");
+
+        var city = NullIfBlank(request.City);
+        var duplicated = await _context.Cinemas.AnyAsync(c =>
+            c.Id != id && c.Name == name && c.City == city);
+        if (duplicated)
+            return ServiceResult<CinemaDto>.Fail(409, "Rạp cùng tên đã tồn tại trong thành phố này");
+
+        cinema.Name = name;
+        cinema.Address = NullIfBlank(request.Address);
+        cinema.City = city;
+        cinema.Hotline = NullIfBlank(request.Hotline);
+        cinema.ImageUrl = NullIfBlank(request.ImageUrl);
+
+        await _context.SaveChangesAsync();
+
+        return ServiceResult<CinemaDto>.Ok(ToCinemaDto(cinema));
+    }
+
+    // DELETE /api/cinemas/{id}  (xóa mềm)
+    public async Task<ServiceResult<bool>> DeleteCinemaAsync(Guid id)
+    {
+        var cinema = await _context.Cinemas.FirstOrDefaultAsync(c => c.Id == id);
+        if (cinema == null)
+            return ServiceResult<bool>.Fail(404, "Không tìm thấy rạp");
+
+        var now = DateTime.UtcNow;
+
+        var hasUpcomingShowtimes = await _context.Showtimes.AnyAsync(s =>
+            s.Auditorium.CinemaId == id &&
+            s.Status == ShowtimeStatus.Scheduled &&
+            s.EndTime > now);
+
+        if (hasUpcomingShowtimes)
+            return ServiceResult<bool>.Fail(
+                409, "Rạp đang có suất chiếu chưa kết thúc, không thể xóa");
+
+        await using var tx = await _context.Database.BeginTransactionAsync();
+
+        cinema.DeletedAt = now;
+
+        var auditoriums = await _context.Auditoriums
+            .Where(a => a.CinemaId == id)
+            .ToListAsync();
+        foreach (var a in auditoriums) a.DeletedAt = now;
+
+        var cinemaSnacks = await _context.CinemaSnacks
+            .Where(cs => cs.CinemaId == id)
+            .ToListAsync();
+        foreach (var cs in cinemaSnacks) cs.DeletedAt = now;
+
+        await _context.SaveChangesAsync();
+        await tx.CommitAsync();
+
+        return ServiceResult<bool>.Ok(true);
+    }
+
+    // GET /api/reports/occupancy-rates?from=...&to=...
+    public async Task<List<OccupancyRateDto>> GetOccupancyRatesAsync(DateTime? from, DateTime? to)
+    {
+        var fromUtc = ToUtc(from);
+        var toUtc = ToUtc(to);
+
+        var query = _context.ShowtimeSeats
+            .Where(ss => ss.Showtime.Status != ShowtimeStatus.Cancelled);
+
+        if (fromUtc.HasValue)
+            query = query.Where(ss => ss.Showtime.StartTime >= fromUtc.Value);
+        if (toUtc.HasValue)
+            query = query.Where(ss => ss.Showtime.StartTime < toUtc.Value);
+
+        var stats = await query
+            .GroupBy(ss => ss.Showtime.Auditorium.CinemaId)
+            .Select(g => new
+            {
+                CinemaId = g.Key,
+                Total = g.Count(),
+                Reserved = g.Count(x => x.Status == "reserved")
+            })
+            .ToListAsync();
+
+        var statMap = stats.ToDictionary(x => x.CinemaId);
+
+        var cinemas = await _context.Cinemas
+            .OrderBy(c => c.Name)
+            .Select(c => new { c.Id, c.Name, c.City })
+            .ToListAsync();
+
+        return cinemas.Select(c =>
+        {
+            statMap.TryGetValue(c.Id, out var s);
+            var total = s?.Total ?? 0;
+            var reserved = s?.Reserved ?? 0;
+
+            return new OccupancyRateDto
+            {
+                CinemaId = c.Id,
+                CinemaName = c.Name,
+                City = c.City,
+                TotalSeats = total,
+                ReservedSeats = reserved,
+                OccupancyRate = total == 0 ? 0 : Math.Round(reserved * 100.0 / total, 2)
+            };
+        }).ToList();
+    }
 }
