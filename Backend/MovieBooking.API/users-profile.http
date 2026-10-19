@@ -1,0 +1,120 @@
+@baseUrl = http://localhost:5000
+@token = paste-internal-jwt-here
+@adminUserId = 00000000-0000-0000-0000-000000000000
+
+### Read the signed-in user's current profile
+GET {{baseUrl}}/api/users/profile
+Authorization: Bearer {{token}}
+
+### Update profile fields
+PUT {{baseUrl}}/api/users/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "Nguyen Van A",
+  "phone": "0912345678"
+}
+
+### Upload a profile avatar (JPEG, PNG, or WebP; maximum 5 MB)
+POST {{baseUrl}}/api/users/profile/avatar
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=AvatarBoundary
+
+--AvatarBoundary
+Content-Disposition: form-data; name="file"; filename="avatar.png"
+Content-Type: image/png
+
+< ./avatar.png
+--AvatarBoundary--
+
+### Reject a phone number that is not exactly 10 digits
+PUT {{baseUrl}}/api/users/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "Nguyen Van A",
+  "phone": "12345"
+}
+
+### Change password for a local account
+PUT {{baseUrl}}/api/users/change-password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "currentPassword": "current-password",
+  "newPassword": "new-password"
+}
+
+### Request a reset link; the response does not reveal whether the account exists
+POST {{baseUrl}}/api/auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "customer@example.com"
+}
+
+### Reset a local password using the one-time token from the email link
+POST {{baseUrl}}/api/auth/reset-password
+Content-Type: application/json
+
+{
+  "token": "paste-64-character-hex-token-here",
+  "newPassword": "new-password"
+}
+
+### Reset with an invalid, expired, or already-used token returns the same 400 response
+POST {{baseUrl}}/api/auth/reset-password
+Content-Type: application/json
+
+{
+  "token": "invalid-token",
+  "newPassword": "new-password"
+}
+
+### List users (Admin only; status is active or locked)
+GET {{baseUrl}}/api/admin/users?page=1&pageSize=20&search=customer&role=Customer&status=active
+Authorization: Bearer {{token}}
+
+### Read a user, including a locked account (Admin only)
+GET {{baseUrl}}/api/admin/users/{{adminUserId}}
+Authorization: Bearer {{token}}
+
+### Create a local user (Admin only)
+POST {{baseUrl}}/api/admin/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "New Cinema Staff",
+  "email": "new-staff@example.com",
+  "phone": "0912345678",
+  "password": "initial-password",
+  "role": "Staff"
+}
+
+### Update a user's profile, role, and optionally reset a Local password (Admin only)
+PUT {{baseUrl}}/api/admin/users/{{adminUserId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "Updated Cinema Staff",
+  "phone": "0912345678",
+  "role": "Staff",
+  "newPassword": "new-initial-password"
+}
+
+### Soft-delete (lock) a user while preserving booking history
+DELETE {{baseUrl}}/api/admin/users/{{adminUserId}}
+Authorization: Bearer {{token}}
+
+### Restore a locked user (Admin only)
+PATCH {{baseUrl}}/api/admin/users/{{adminUserId}}/restore
+Authorization: Bearer {{token}}
+
+### Permanently delete only a user with no bookings (Admin only)
+DELETE {{baseUrl}}/api/admin/users/{{adminUserId}}?hardDelete=true
+Authorization: Bearer {{token}}
