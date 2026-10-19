@@ -3,9 +3,15 @@ namespace MovieBooking.Service.DTOs;
 public class CreateBookingRequest
 {
     public Guid ShowtimeId { get; set; }
+
     public List<Guid> ShowtimeSeatIds { get; set; } = new();
+
+    public string HoldToken { get; set; } = string.Empty;
+
     public List<BookingSnackItemRequest> Snacks { get; set; } = new();
-    public string PaymentProvider { get; set; } = "VNPAY"; // VNPAY, MOMO, STRIPE
+
+    public string PaymentProvider { get; set; } = "VNPAY";
+
     public string PaymentMethod { get; set; } = "QR";
 }
 

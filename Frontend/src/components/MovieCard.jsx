@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { Star, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
@@ -57,12 +57,12 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
                 />
 
                 {/* Rating */}
-                {movie.rating !== undefined && movie.rating !== null && (
+                {movie.ratingScore !== undefined && movie.ratingScore !== null && (
                     <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 px-2 py-1 rounded-md text-sm">
                         <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
 
                         <span className="text-white">
-                            {Number(movie.rating).toFixed(1)}
+                            {Number(movie.ratingScore).toFixed(1)}
                         </span>
                     </div>
                 )}
@@ -92,7 +92,7 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
 
                 {/* Duration */}
                 <p className="text-gray-400 text-sm mt-1">
-                    Thời lượng: {formatDuration(movie.duration)}
+                    Thời lượng: {formatDuration(movie.durationMin)}
                 </p>
             </div>
 
