@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import BlurCircle from '../components/BlurCircle';
 import { useCinemas } from '../api/useCinemas';
 
 const Theaters = () => {
+    const navigate = useNavigate();
+
     const [cinemas, setCinemas] = useState([]);
     const [selectedCity, setSelectedCity] = useState('');
     const [selectedCinema, setSelectedCinema] = useState(null);
@@ -85,6 +88,17 @@ const Theaters = () => {
         } catch (err) {
             setError(err.message || 'Không thể tải thông tin rạp');
         }
+    };
+
+    // Chuyển sang trang phim, kèm bộ lọc theo rạp
+    const handleViewMovies = (cinema) => {
+        const params = new URLSearchParams();
+
+        if (cinema.city) params.set('city', cinema.city);
+        params.set('cinemaId', cinema.id);
+
+        navigate(`/movies?${params.toString()}`);
+        window.scrollTo(0, 0);
     };
 
     return (
@@ -241,12 +255,23 @@ const Theaters = () => {
                                 )}
                             </div>
 
-                            <button
-                                onClick={() => setSelectedCinema(null)}
-                                className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
-                            >
-                                Đóng
-                            </button>
+                            <div className="flex shrink-0 gap-3">
+                                <button
+                                    onClick={() =>
+                                        handleViewMovies(selectedCinema)
+                                    }
+                                    className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+                                >
+                                    Xem Phim & Suất Chiếu
+                                </button>
+
+                                <button
+                                    onClick={() => setSelectedCinema(null)}
+                                    className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+                                >
+                                    Đóng
+                                </button>
+                            </div>
                         </div>
 
                         <h3 className="mb-4 text-xl font-semibold">

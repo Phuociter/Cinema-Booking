@@ -287,10 +287,16 @@ public class CinemaService : ICinemaService
                     s.column_number,
                     st.name AS seat_type
                 FROM seats s
+                INNER JOIN auditoriums a
+                    ON a.id = s.auditorium_id
+                    AND a.deleted_at IS NULL
+                INNER JOIN cinemas c
+                    ON c.id = a.cinema_id
+                    AND c.deleted_at IS NULL
                 INNER JOIN seattypes st
                     ON st.id = s.seat_type_id
-                WHERE s.auditorium_id = @auditoriumId
                     AND st.deleted_at IS NULL
+                WHERE s.auditorium_id = @auditoriumId
                 ORDER BY s.row_label, s.column_number;
             ";
 
