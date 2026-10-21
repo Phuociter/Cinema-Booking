@@ -14,7 +14,8 @@ import {
   User,
   LogIn,
   ChevronDown,
-  LogOut
+  LogOut,
+  LayoutDashboard
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import SearchModal from './SearchModal';
@@ -27,6 +28,7 @@ const Navbar = () => {
   const { user, isAuthenticated, logout, openLoginModal } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isAdmin = user?.roles?.some((role) => role.toLowerCase() === 'admin');
 
   // Handle scroll effect
   useEffect(() => {
@@ -187,6 +189,16 @@ const Navbar = () => {
                           <p className="text-sm font-semibold text-white truncate">{user?.fullName || 'Người dùng'}</p>
                           <p className="text-xs text-gray-400 truncate">{user?.email}</p>
                         </div>
+                        {isAdmin && (
+                          <Link
+                            to="/admin"
+                            onClick={() => setIsUserMenuOpen(false)}
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10 transition-colors font-medium border-b border-white/10"
+                          >
+                            <LayoutDashboard className="w-4 h-4 text-yellow-400" />
+                            <span>Trang Quản Trị</span>
+                          </Link>
+                        )}
                         <Link
                           to="/profile"
                           onClick={() => setIsUserMenuOpen(false)}
@@ -300,6 +312,19 @@ const Navbar = () => {
                       </p>
                     </div>
                   </div>
+
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        navigate('/admin');
+                        setIsOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10 rounded-xl transition-colors duration-300 font-medium"
+                    >
+                      <LayoutDashboard className="w-5 h-5 text-yellow-400" />
+                      <span>Trang Quản Trị</span>
+                    </button>
+                  )}
                   
                   <button
                     onClick={() => {

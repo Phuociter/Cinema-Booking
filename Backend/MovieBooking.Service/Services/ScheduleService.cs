@@ -26,10 +26,10 @@ public class ScheduleService : IScheduleService
 
     public async Task<PagedResult<ShowtimeDto>> GetShowtimesAsync(
         Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom = null, DateOnly? dateTo = null,
-        int page = 1, int pageSize = 20)
+        string? status = null, int page = 1, int pageSize = 20)
     {
         (page, pageSize) = NormalizePaging(page, pageSize);
-        var cacheKey = BuildShowtimesCacheKey(movieId, cinemaId, date, dateFrom, dateTo, page, pageSize);
+        var cacheKey = BuildShowtimesCacheKey(movieId, cinemaId, date, dateFrom, dateTo, status, page, pageSize);
 
         var cached = await _redisService.GetObjectAsync<PagedResult<ShowtimeDto>>(cacheKey);
         if (cached != null)
@@ -38,11 +38,10 @@ public class ScheduleService : IScheduleService
         }
 
         var (items, totalCount) = await _showtimeRepository.GetShowtimesWithDetailsAsync(
-            movieId, cinemaId, date, dateFrom, dateTo, page, pageSize);
+            movieId, cinemaId, date, dateFrom, dateTo, status, page, pageSize);
 
         var result = new PagedResult<ShowtimeDto>
         {
-            
             Page = page,
             PageSize = pageSize,
             TotalCount = totalCount,
@@ -53,19 +52,25 @@ public class ScheduleService : IScheduleService
         return result;
     }
 
+    public async Task InvalidateShowtimesCacheAsync()
+    {
+        await _redisService.RemoveByPrefixAsync("showtimes:query:");
+    }
+
     private static (int Page, int PageSize) NormalizePaging(int page, int pageSize)
     {
         if (page <= 0) page = 1;
-        if (pageSize <= 0 || pageSize > 100) pageSize = 20;
+        pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
         return (page, pageSize);
     }
 
     private static string BuildShowtimesCacheKey(
-        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom, DateOnly? dateTo, int page, int pageSize)
+        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom, DateOnly? dateTo, string? status, int page, int pageSize)
     {
         var dateKey = date?.ToString("yyyy-MM-dd")
             ?? (dateFrom.HasValue || dateTo.HasValue ? $"{dateFrom:yyyy-MM-dd}_{dateTo:yyyy-MM-dd}" : "all");
-        return $"showtimes:query:{dateKey}:{movieId?.ToString() ?? "all"}:{cinemaId?.ToString() ?? "all"}:p{page}:s{pageSize}";
+        var statusKey = string.IsNullOrWhiteSpace(status) ? "default" : status.ToLower();
+        return $"showtimes:query:{statusKey}:{dateKey}:{movieId?.ToString() ?? "all"}:{cinemaId?.ToString() ?? "all"}:p{page}:s{pageSize}";
     }
 
     public async Task<ShowtimeDto?> GetShowtimeByIdAsync(Guid id)

@@ -35,10 +35,11 @@ public class ShowtimesController : ControllerBase
         [FromQuery] DateOnly? date,
         [FromQuery] DateOnly? dateFrom,
         [FromQuery] DateOnly? dateTo,
+        [FromQuery] string? status,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
-        var result = await _scheduleService.GetShowtimesAsync(movieId, cinemaId, date, dateFrom, dateTo, page, pageSize);
+        var result = await _scheduleService.GetShowtimesAsync(movieId, cinemaId, date, dateFrom, dateTo, status, page, pageSize);
         return Ok(result);
     }
 
@@ -175,6 +176,8 @@ public class ShowtimesController : ControllerBase
             Status = showtime.Status
         };
 
+        await _scheduleService.InvalidateShowtimesCacheAsync();
+
         return CreatedAtAction(nameof(GetShowtimeById), new { id = showtime.Id }, responseDto);
     }
 
@@ -268,12 +271,64 @@ public class ShowtimesController : ControllerBase
             await _redisService.RemoveAsync(key);
         }
 
+        await _scheduleService.InvalidateShowtimesCacheAsync();
+
         return Ok(new
         {
             message = "Hủy suất chiếu thành công.",
             showtimeId = id,
             status = showtime.Status,
             cancelledPendingBookingsCount = pendingBookings.Count
+        });
+    }
+
+    // PUT /api/showtimes/{id}/restore
+    [HttpPut("{id:guid}/restore")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> RestoreShowtime(Guid id)
+    {
+        var showtime = await _context.Showtimes
+            .FirstOrDefaultAsync(s => s.Id == id);
+
+        if (showtime == null)
+        {
+            return NotFound(new { message = $"Không tìm thấy suất chiếu với ID: {id}" });
+        }
+
+        if (showtime.Status != ShowtimeStatus.Cancelled)
+        {
+            return BadRequest(new { message = "Chỉ có thể mở lại suất chiếu đã bị hủy." });
+        }
+
+        if (showtime.StartTime <= DateTime.UtcNow)
+        {
+            return BadRequest(new { message = "Không thể mở lại suất chiếu đã qua thời gian bắt đầu." });
+        }
+
+        // Kiểm tra xem phòng chiếu trong khung giờ này đã có suất chiếu nào khác đang active không
+        var hasOverlap = await _context.Showtimes
+            .AnyAsync(s => s.Id != id
+                        && s.AuditoriumId == showtime.AuditoriumId
+                        && s.Status != ShowtimeStatus.Cancelled
+                        && s.StartTime < showtime.EndTime
+                        && s.EndTime > showtime.StartTime);
+
+        if (hasOverlap)
+        {
+            return StatusCode(409, new { message = "Không thể mở lại vì phòng chiếu đã có một suất chiếu khác hoạt động trong khung giờ này." });
+        }
+
+        showtime.Status = ShowtimeStatus.Scheduled;
+        await _context.SaveChangesAsync();
+
+        // Xóa cache Redis danh sách suất chiếu
+        await _scheduleService.InvalidateShowtimesCacheAsync();
+
+        return Ok(new
+        {
+            message = "Mở lại suất chiếu thành công.",
+            showtimeId = id,
+            status = showtime.Status
         });
     }
 

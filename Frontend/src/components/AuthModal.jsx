@@ -153,6 +153,12 @@ export default function AuthModal({ mode, onClose }) {
   const submit = async (event) => {
     event.preventDefault();
     setError('');
+
+    if (!isLogin && form.password.length < 6) {
+      setError('Mật khẩu phải có tối thiểu 6 ký tự');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -196,7 +202,7 @@ export default function AuthModal({ mode, onClose }) {
             </>
           )}
           <input name="email" type="email" value={form.email} onChange={updateField} placeholder="Email" required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
-          <input name="password" type="password" value={form.password} onChange={updateField} placeholder="Mật khẩu" minLength={6} required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+          <input name="password" type="password" value={form.password} onChange={updateField} placeholder="Mật khẩu" minLength={isLogin ? undefined : 6} required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
           {error && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
           <button type="submit" disabled={isSubmitting} className="w-full rounded-lg bg-red-500 px-4 py-3 font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer">
             {isSubmitting ? 'Đang xử lý...' : isLogin ? 'Đăng nhập' : 'Đăng ký'}
