@@ -213,11 +213,16 @@ CREATE TABLE Users (
     full_name       VARCHAR(150),
     email           VARCHAR(150) NOT NULL,        -- uniqueness enforced by partial index below
     phone           VARCHAR(20),
-    password_hash   TEXT NOT NULL,
+    password_hash   TEXT,
+    auth_provider   VARCHAR(20) NOT NULL DEFAULT 'local',
+    clerk_id        VARCHAR(100),
     avatar_url      TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at      TIMESTAMPTZ DEFAULT NULL
+    deleted_at      TIMESTAMPTZ DEFAULT NULL,
+    CONSTRAINT uq_users_clerk_id UNIQUE (clerk_id),
+    CONSTRAINT chk_users_has_at_least_one_auth
+        CHECK (password_hash IS NOT NULL OR clerk_id IS NOT NULL)
 );
 
 -- Email must be unique only among active (non-deleted) users,

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useClerk, useAuth as useClerkAuth } from '@clerk/clerk-react';
+import ForgotPasswordForm from './ForgotPasswordForm';
 
 const IS_CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
@@ -139,10 +140,16 @@ function ClerkAuthSection({ isLogin, onClose, setError }) {
 
 export default function AuthModal({ mode, onClose }) {
   const { login, register, isAuthenticated } = useAuth();
-  const [isLogin, setIsLogin] = useState(mode !== 'register');
+  const [authMode, setAuthMode] = useState(mode === 'register' ? 'register' : 'login');
   const [form, setForm] = useState({ fullName: '', email: '', password: '', phone: '' });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isLogin = authMode === 'login';
+
+  useEffect(() => {
+    setAuthMode(mode === 'register' ? 'register' : 'login');
+    setError('');
+  }, [mode]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -186,36 +193,71 @@ export default function AuthModal({ mode, onClose }) {
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-semibold text-white">{isLogin ? 'Đăng nhập' : 'Tạo tài khoản'}</h2>
-            <p className="mt-1 text-sm text-gray-400">{isLogin ? 'Đăng nhập để tiếp tục đặt vé.' : 'Đăng ký tài khoản để đặt vé và lưu phim.'}</p>
+            <h2 className="text-2xl font-semibold text-white">
+              {authMode === 'forgot' ? 'Quên mật khẩu' : isLogin ? 'Đăng nhập' : 'Tạo tài khoản'}
+            </h2>
+            <p className="mt-1 text-sm text-gray-400">
+              {authMode === 'forgot'
+                ? 'Nhận liên kết để đặt lại mật khẩu qua email.'
+                : isLogin ? 'Đăng nhập để tiếp tục đặt vé.' : 'Đăng ký tài khoản để đặt vé và lưu phim.'}
+            </p>
           </div>
           <button type="button" onClick={onClose} className="rounded-full p-2 text-gray-400 hover:bg-white/10 hover:text-white" aria-label="Đóng">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={submit} className="space-y-4">
-          {!isLogin && (
-            <>
-              <input name="fullName" value={form.fullName} onChange={updateField} placeholder="Họ và tên" required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
-              <input name="phone" value={form.phone} onChange={updateField} placeholder="Số điện thoại (không bắt buộc)" className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
-            </>
-          )}
-          <input name="email" type="email" value={form.email} onChange={updateField} placeholder="Email" required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
-          <input name="password" type="password" value={form.password} onChange={updateField} placeholder="Mật khẩu" minLength={isLogin ? undefined : 6} required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
-          {error && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
-          <button type="submit" disabled={isSubmitting} className="w-full rounded-lg bg-red-500 px-4 py-3 font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer">
-            {isSubmitting ? 'Đang xử lý...' : isLogin ? 'Đăng nhập' : 'Đăng ký'}
-          </button>
-        </form>
+        {authMode === 'forgot' ? (
+          <ForgotPasswordForm
+            initialEmail={form.email}
+            onBack={(email) => {
+              setForm((current) => ({ ...current, email }));
+              setAuthMode('login');
+              setError('');
+            }}
+          />
+        ) : (
+          <>
+            <form onSubmit={submit} className="space-y-4">
+              {!isLogin && (
+                <>
+                  <input name="fullName" value={form.fullName} onChange={updateField} placeholder="Họ và tên" required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+                  <input name="phone" value={form.phone} onChange={updateField} placeholder="Số điện thoại (không bắt buộc)" className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+                </>
+              )}
+              <input name="email" type="email" value={form.email} onChange={updateField} placeholder="Email" required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+              <input name="password" type="password" value={form.password} onChange={updateField} placeholder="Mật khẩu" minLength={6} required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+              {error && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+              <button type="submit" disabled={isSubmitting} className="w-full cursor-pointer rounded-lg bg-red-500 px-4 py-3 font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60">
+                {isSubmitting ? 'Đang xử lý...' : isLogin ? 'Đăng nhập' : 'Đăng ký'}
+              </button>
+            </form>
 
-        {IS_CLERK_ENABLED && (
-          <ClerkAuthSection isLogin={isLogin} onClose={onClose} setError={setError} />
+            {isLogin && (
+              <button
+                type="button"
+                onClick={() => { setAuthMode('forgot'); setError(''); }}
+                className="mt-3 w-full cursor-pointer text-sm text-gray-400 hover:text-white"
+              >
+                Quên mật khẩu?
+              </button>
+            )}
+
+            {authMode !== 'forgot' && IS_CLERK_ENABLED && (
+              <ClerkAuthSection isLogin={isLogin} onClose={onClose} setError={setError} />
+            )}
+
+            {authMode !== 'forgot' && (
+              <button
+                type="button"
+                onClick={() => { setAuthMode((current) => current === 'login' ? 'register' : 'login'); setError(''); }}
+                className="mt-5 w-full cursor-pointer text-sm text-gray-400 hover:text-white"
+              >
+                {isLogin ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập'}
+              </button>
+            )}
+          </>
         )}
-
-        <button type="button" onClick={() => { setIsLogin((current) => !current); setError(''); }} className="mt-5 w-full text-sm text-gray-400 hover:text-white cursor-pointer">
-          {isLogin ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập'}
-        </button>
       </div>
     </div>
   );

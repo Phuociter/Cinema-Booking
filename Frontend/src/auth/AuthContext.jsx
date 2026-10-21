@@ -14,8 +14,13 @@ const AuthContext = createContext(null);
 function ClerkSyncHandler() {
   const { isSignedIn, getToken, isLoaded } = useClerkAuth();
   const clerk = useClerk();
-  const { loginWithClerk, isAuthenticated } = useAuth();
+  const { loginWithClerk, isAuthenticated, setClerkSignOut } = useAuth();
   const isSyncingRef = useRef(false);
+
+  useEffect(() => {
+    setClerkSignOut(() => () => clerk.signOut());
+    return () => setClerkSignOut(() => null);
+  }, [clerk, setClerkSignOut]);
 
   useEffect(() => {
     if (!isLoaded || isSyncingRef.current) return;
@@ -52,8 +57,8 @@ function ClerkSyncHandler() {
 }
 
 export function AuthProvider({ children }) {
-  const clerk = useClerk();
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
+  const [clerkSignOut, setClerkSignOut] = useState(null);
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem(USER_KEY);
     return savedUser ? JSON.parse(savedUser) : null;
@@ -94,11 +99,13 @@ export function AuthProvider({ children }) {
   const login = (payload) => authenticate(accountApi.login(payload));
   const register = (payload) => authenticate(accountApi.register(payload));
   const loginWithClerk = (clerkToken) => authenticate(accountApi.clerkSync(clerkToken));
+  const updateUser = useCallback((updatedUser) => {
+    setUser((currentUser) => currentUser ? { ...currentUser, ...updatedUser } : updatedUser);
+  }, []);
+
   const logout = async () => {
     try {
-      if (IS_CLERK_ENABLED && clerk) {
-        await clerk.signOut();
-      }
+      if (IS_CLERK_ENABLED && clerkSignOut) await clerkSignOut();
     } catch (err) {
       console.warn('Clerk signOut error:', err);
     } finally {
@@ -121,7 +128,9 @@ export function AuthProvider({ children }) {
       login,
       register,
       loginWithClerk,
+      updateUser,
       logout,
+      setClerkSignOut,
       authModal,
       openLoginModal,
       openRegisterModal,
@@ -140,4 +149,3 @@ export function useAuth() {
   if (!context) throw new Error('useAuth must be used inside AuthProvider');
   return context;
 }
-

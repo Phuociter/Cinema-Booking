@@ -109,9 +109,18 @@ Tài liệu này tổng hợp toàn bộ các API Endpoints, Contract giữa cá
 | `POST` | `/api/auth/login` | **Public** | Đăng nhập Email/Password -> Trả chuỗi JWT Token |
 | `POST` | `/api/auth/clerk-sync` | **Clerk Authenticated** | Đồng bộ tài khoản Clerk SSO: xác thực Clerk JWT, auto-link hoặc tạo User mới (`auth_provider = 'clerk'`), trả chuỗi JWT nội bộ |
 | `GET` | `/api/auth/me` | **Customer** | Lấy thông tin profile người dùng đang đăng nhập từ Token Claims |
-| `PUT` | `/api/users/profile` | **Customer** | Cập nhật thông tin cá nhân (Họ tên, số điện thoại, avatar) |
+| `PUT` | `/api/users/profile` | **Customer** | Cập nhật họ tên và số điện thoại |
+| `POST` | `/api/users/profile/avatar` | **Customer** | Tải ảnh JPEG/PNG/WebP tối đa 5 MB lên máy chủ, lưu cục bộ và cập nhật avatar |
 | `PUT` | `/api/users/change-password` | **Customer** | Đổi mật khẩu tài khoản (`PasswordHasher<User>`) |
-| `GET` | `/api/users` | **Admin** | Quản lý danh sách người dùng hệ thống (Khách hàng, Nhân viên, Admin) |
+| `POST` | `/api/auth/forgot-password` | **Public** | Gửi liên kết reset một lần qua email (TTL 15 phút); phản hồi chung để tránh dò tài khoản |
+| `POST` | `/api/auth/reset-password` | **Public** | Đặt mật khẩu mới bằng token reset dùng một lần |
+| `GET` | `/api/admin/users` | **Admin** | Tìm kiếm, lọc vai trò/trạng thái và phân trang người dùng; trả số đơn và tổng chi tiêu đã thanh toán |
+| `GET` | `/api/admin/users/{id}` | **Admin** | Xem chi tiết tài khoản, gồm cả tài khoản đã khóa |
+| `POST` | `/api/admin/users` | **Admin** | Tạo tài khoản Local và gán vai trò Customer/Staff/Admin trong cùng transaction |
+| `PUT` | `/api/admin/users/{id}` | **Admin** | Cập nhật thông tin/vai trò; có thể đặt lại mật khẩu tài khoản Local |
+| `DELETE` | `/api/admin/users/{id}` | **Admin** | Khóa mềm, giữ nguyên lịch sử vé và đơn đặt |
+| `DELETE` | `/api/admin/users/{id}?hardDelete=true` | **Admin** | Xóa cứng chỉ khi tài khoản chưa có đơn đặt vé |
+| `PATCH` | `/api/admin/users/{id}/restore` | **Admin** | Khôi phục tài khoản đã khóa nếu email không bị tài khoản khác sử dụng |
 | `POST` | `/api/payments/create-url` | **Customer** | Sinh URL redirect sang cổng thanh toán VNPay / MoMo Sandbox |
 | `POST` | `/api/payments/callback` | **Public Webhook** | **Webhook Callback API:** Tiếp nhận phản hồi từ cổng thanh toán, xác thực chữ ký HMAC-SHA256, chốt vé hoặc nhả ghế |
 | `GET` | `/api/payments/{bookingId}` | **Customer** | Kiểm tra trạng thái giao dịch thanh toán của đơn hàng |
@@ -209,4 +218,4 @@ Tài liệu này tổng hợp toàn bộ các API Endpoints, Contract giữa cá
 | `/admin/cinemas` | **Dev B** | `POST /api/cinemas`, `POST /api/auditoriums`, `GET /api/auditoriums/{id}/seats` | Độc lập (Dev B tự làm cả FE lẫn BE) |
 | `/admin/showtimes` | **Dev C** | `POST /api/showtimes`, `PUT /api/showtimes/{id}/cancel` | Độc lập (Dev C tự làm cả FE lẫn BE) |
 | `/admin/snacks` | **Dev D** | `POST /api/cinemas/{cinemaId}/snacks`, `GET /api/snacks` | Độc lập (Dev D tự làm cả FE lẫn BE) |
-| `/admin/users` | **Dev E** | `GET /api/users` | Độc lập |
+| `/admin/users` | **Dev E** | `GET/POST /api/admin/users`, `GET/PUT/DELETE /api/admin/users/{id}`, `PATCH /api/admin/users/{id}/restore` | CRUD tài khoản và vai trò; xóa cứng chỉ cho tài khoản chưa có booking |

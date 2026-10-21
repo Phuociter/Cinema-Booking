@@ -8,6 +8,8 @@ using Microsoft.IdentityModel.Tokens;
 using MovieBooking.Data;
 using MovieBooking.Data.Entities;
 using MovieBooking.Service.DTOs;
+using MovieBooking.Service.Interfaces;
+using StackExchange.Redis;
 
 namespace MovieBooking.API.Controllers;
 
@@ -17,11 +19,19 @@ public class AuthController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly IUserProfileService _userProfileService;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(AppDbContext context, IConfiguration configuration)
+    public AuthController(
+        AppDbContext context,
+        IConfiguration configuration,
+        IUserProfileService userProfileService,
+        ILogger<AuthController> logger)
     {
         _context = context;
         _configuration = configuration;
+        _userProfileService = userProfileService;
+        _logger = logger;
     }
 
     [HttpPost("register")]
@@ -71,6 +81,8 @@ public class AuthController : ControllerBase
                 FullName = user.FullName,
                 Email = user.Email,
                 Phone = user.Phone,
+                AvatarUrl = user.AvatarUrl,
+                AuthProvider = user.AuthProvider,
                 Roles = roles
             }
         });
@@ -85,7 +97,8 @@ public class AuthController : ControllerBase
         var user = await _context.Users
             .Include(item => item.UserRoles)
                 .ThenInclude(userRole => userRole.Role)
-            .FirstOrDefaultAsync(u => u.Email == request.Email.Trim() && u.DeletedAt == null);
+            .FirstOrDefaultAsync(
+                u => u.Email.ToLower() == request.Email.Trim().ToLower() && u.DeletedAt == null);
 
         if (user == null || string.IsNullOrEmpty(user.PasswordHash) || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             return Unauthorized(new { message = "Email hoặc mật khẩu không hợp lệ" });
@@ -103,9 +116,74 @@ public class AuthController : ControllerBase
                 FullName = user.FullName,
                 Email = user.Email,
                 Phone = user.Phone,
+                AvatarUrl = user.AvatarUrl,
+                AuthProvider = user.AuthProvider,
                 Roles = roles
             }
         });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("forgot-password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ForgotPassword(
+        [FromBody] ForgotPasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        const string responseMessage =
+            "Nếu email tồn tại, chúng tôi đã gửi hướng dẫn đặt lại mật khẩu.";
+        var frontendUrl = _configuration["FRONTEND_URL"]
+            ?? Environment.GetEnvironmentVariable("FRONTEND_URL")
+            ?? string.Empty;
+
+        try
+        {
+            await _userProfileService.RequestPasswordResetAsync(
+                request.Email,
+                frontendUrl,
+                cancellationToken);
+        }
+        catch (RedisException exception)
+        {
+            _logger.LogError(exception, "Password-reset request could not access Redis.");
+        }
+        catch (EmailDeliveryException exception)
+        {
+            _logger.LogError(exception, "Password-reset email delivery failed.");
+        }
+        catch (InvalidOperationException exception)
+        {
+            _logger.LogError(exception, "Password-reset request could not be completed due to invalid configuration.");
+        }
+
+        return Ok(new { message = responseMessage });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("reset-password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword(
+        [FromBody] ResetPasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        const string invalidTokenMessage = "Liên kết không hợp lệ hoặc đã hết hạn.";
+
+        try
+        {
+            var result = await _userProfileService.ResetPasswordAsync(request, cancellationToken);
+            return result switch
+            {
+                ResetPasswordResult.Success => Ok(new { message = "Đặt lại mật khẩu thành công." }),
+                ResetPasswordResult.InvalidToken => BadRequest(new { message = invalidTokenMessage }),
+                _ => throw new InvalidOperationException("Unexpected password-reset result.")
+            };
+        }
+        catch (RedisException exception)
+        {
+            _logger.LogError(exception, "Password-reset token could not be verified because Redis is unavailable.");
+            return BadRequest(new { message = invalidTokenMessage });
+        }
     }
 
     [Authorize]
@@ -132,6 +210,8 @@ public class AuthController : ControllerBase
             FullName = user.FullName,
             Email = user.Email,
             Phone = user.Phone,
+            AvatarUrl = user.AvatarUrl,
+            AuthProvider = user.AuthProvider,
             Roles = GetRoles(user)
         });
     }
@@ -174,8 +254,8 @@ public class AuthController : ControllerBase
                 {
                     var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
                     var address = item.TryGetProperty("email_address", out var addrProp) ? addrProp.GetString() : null;
-                    var isVerified = item.TryGetProperty("verification", out var vProp) 
-                        && vProp.TryGetProperty("status", out var sProp) 
+                    var isVerified = item.TryGetProperty("verification", out var vProp)
+                        && vProp.TryGetProperty("status", out var sProp)
                         && sProp.GetString() == "verified";
 
                     if (isVerified && (id == primaryEmailId || string.IsNullOrEmpty(email)))
@@ -270,6 +350,7 @@ public class AuthController : ControllerBase
                 Email = user.Email,
                 Phone = user.Phone,
                 AvatarUrl = user.AvatarUrl,
+                AuthProvider = user.AuthProvider,
                 Roles = roles
             }
         });

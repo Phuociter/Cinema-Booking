@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import SearchModal from './SearchModal';
+import UserAvatar from './UserAvatar';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -170,9 +171,7 @@ const Navbar = () => {
                     onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                     className="flex items-center gap-2.5 rounded-full bg-white/10 hover:bg-white/20 px-3.5 py-2 text-sm text-gray-200 hover:text-white transition-all duration-200 border border-white/10 shadow-sm"
                   >
-                    <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-xs font-bold text-white uppercase">
-                      {user?.fullName ? user.fullName[0] : 'U'}
-                    </div>
+                    <UserAvatar src={user?.avatarUrl} name={user?.fullName} className="h-6 w-6 text-xs" />
                     <span className="hidden lg:inline text-sm font-medium">{user?.fullName || 'Tài khoản'}</span>
                     <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isUserMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -300,9 +299,7 @@ const Navbar = () => {
               {isAuthenticated && (
                 <div className="pt-4 mt-4 border-t border-white/10 space-y-2">
                   <div className="flex items-center gap-3 px-4 py-3 bg-white/5 rounded-xl">
-                    <div className="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center font-bold text-white uppercase">
-                      {user?.fullName ? user.fullName[0] : 'U'}
-                    </div>
+                    <UserAvatar src={user?.avatarUrl} name={user?.fullName} className="h-10 w-10 text-base" />
                     <div className="overflow-hidden">
                       <p className="text-white font-medium truncate">
                         {user?.fullName || 'Bạn'}
