@@ -19,7 +19,8 @@ import PaymentCallback from './pages/PaymentCallback';
 import PublicLayout from './components/PublicLayout';
 import { useAuth } from './auth/AuthContext';
 
-// Admin Portal Pages
+// Admin Portal Pages & Layout
+import AdminLayout from './components/admin/layout/AdminLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminMovies from './pages/admin/AdminMovies';
 import AdminCinemas from './pages/admin/AdminCinemas';
@@ -75,13 +76,15 @@ const App = () => {
       <Toaster />
       <Routes>
         {/* Admin Portal Routes (Bảo vệ bởi AdminRoute) */}
-        <Route path='/admin' element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-        <Route path='/admin/dashboard' element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-        <Route path='/admin/movies' element={<AdminRoute><AdminMovies /></AdminRoute>} />
-        <Route path='/admin/cinemas' element={<AdminRoute><AdminCinemas /></AdminRoute>} />
-        <Route path='/admin/showtimes' element={<AdminRoute><AdminShowtimes /></AdminRoute>} />
-        <Route path='/admin/snacks' element={<AdminRoute><AdminSnacks /></AdminRoute>} />
-        <Route path='/admin/users' element={<AdminRoute><AdminUsers /></AdminRoute>} />
+        <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+          <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="movies" element={<AdminMovies />} />
+          <Route path="cinemas" element={<AdminCinemas />} />
+          <Route path="showtimes" element={<AdminShowtimes />} />
+          <Route path="snacks" element={<AdminSnacks />} />
+          <Route path="users" element={<AdminUsers />} />
+        </Route>
 
         {/* Client Portal Routes (Tự động kèm Navbar & Footer qua PublicLayout) */}
         <Route element={<PublicLayout />}>
