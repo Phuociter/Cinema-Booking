@@ -12,12 +12,28 @@ public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeReposito
     }
 
     public async Task<(IEnumerable<Showtime> Items, int TotalCount)> GetShowtimesWithDetailsAsync(
-        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom = null, DateOnly? dateTo = null, int page = 1, int pageSize = 20)
+        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom = null, DateOnly? dateTo = null, string? status = null, int page = 1, int pageSize = 20)
     {
-        var query = GetBaseShowtimeQuery()
-            .Where(s => s.Status == ShowtimeStatus.Scheduled);
+        var query = GetBaseShowtimeQuery();
 
-        query = ApplyShowtimeFilters(query, movieId, cinemaId, date, dateFrom, dateTo);
+        if (string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            // Do not filter by status, return both scheduled and cancelled
+        }
+        else if (string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(s => s.Status == ShowtimeStatus.Cancelled);
+        }
+        else if (string.Equals(status, "scheduled", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(s => s.Status == ShowtimeStatus.Scheduled);
+        }
+        else
+        {
+            query = query.Where(s => s.Status == ShowtimeStatus.Scheduled);
+        }
+
+        query = ApplyShowtimeFilters(query, movieId, cinemaId, date, dateFrom, dateTo, status);
 
         var totalCount = await query.CountAsync();
 
@@ -56,11 +72,12 @@ public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeReposito
         Guid? cinemaId,
         DateOnly? date,
         DateOnly? dateFrom,
-        DateOnly? dateTo)
+        DateOnly? dateTo,
+        string? status)
     {
         query = ApplyMovieFilter(query, movieId);
         query = ApplyCinemaFilter(query, cinemaId);
-        query = ApplyDateFilter(query, date, dateFrom, dateTo);
+        query = ApplyDateFilter(query, date, dateFrom, dateTo, status);
         return query;
     }
 
@@ -78,15 +95,16 @@ public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeReposito
         IQueryable<Showtime> query,
         DateOnly? date,
         DateOnly? dateFrom,
-        DateOnly? dateTo)
+        DateOnly? dateTo,
+        string? status)
     {
         var nowUtc = DateTime.UtcNow;
 
         if (date.HasValue)
         {
             var startOfDayUtc = date.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            var effectiveStartUtc = startOfDayUtc < nowUtc ? nowUtc : startOfDayUtc;
             var endOfDayUtc = startOfDayUtc.AddDays(1);
+            var effectiveStartUtc = !string.IsNullOrWhiteSpace(status) ? startOfDayUtc : (startOfDayUtc < nowUtc ? nowUtc : startOfDayUtc);
             return query.Where(s => s.StartTime >= effectiveStartUtc && s.StartTime < endOfDayUtc);
         }
 
@@ -95,12 +113,12 @@ public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeReposito
             if (dateFrom.HasValue)
             {
                 var fromUtc = dateFrom.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-                var effectiveFromUtc = fromUtc < nowUtc ? nowUtc : fromUtc;
+                var effectiveFromUtc = !string.IsNullOrWhiteSpace(status) ? fromUtc : (fromUtc < nowUtc ? nowUtc : fromUtc);
                 query = query.Where(s => s.StartTime >= effectiveFromUtc);
             }
             else
             {
-                query = query.Where(s => s.StartTime >= nowUtc);
+                query = query.Where(s => s.StartTime >= (!string.IsNullOrWhiteSpace(status) ? DateTime.MinValue : nowUtc));
             }
 
             if (dateTo.HasValue)
@@ -112,6 +130,6 @@ public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeReposito
             return query;
         }
 
-        return query.Where(s => s.StartTime >= nowUtc);
+        return !string.IsNullOrWhiteSpace(status) ? query : query.Where(s => s.StartTime >= nowUtc);
     }
 }

@@ -1,4 +1,3 @@
-
 import axiosInstance from './axiosInstance';
 
 export const useSnacks = {
@@ -14,7 +13,7 @@ export const useSnacks = {
 
     getCinemaSnacks: async (cinemaId) => {
         try {
-            const response = await axiosInstance.get(`/cinemas/${cinemaId}/snacks`);
+            const response = await axiosInstance.get(`/cinemas/${cinemaId}/snacks?onlyAvailable=true`);
             return response.data || response;
         } catch (error) {
             console.error(`Lỗi khi lấy menu bắp nước cho rạp ${cinemaId}:`, error);

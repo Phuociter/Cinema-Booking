@@ -32,7 +32,7 @@ public class SeatHoldsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> HoldSeats(
         Guid showtimeId,
-        [FromBody] HoldSeatsRequest request)
+        [FromBody] SeatHoldApiRequest request)
     {
         var userIdText =
             User.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -159,7 +159,7 @@ public class SeatHoldsController : ControllerBase
     }
 }
 
-public class HoldSeatsRequest
+public class SeatHoldApiRequest
 {
     public List<Guid> ShowtimeSeatIds { get; set; } = new();
 }

@@ -95,6 +95,13 @@ Backend được cấu hình 2 scheme JWT chạy song song:
 Hàm `Login` nội bộ đã được gia cố:
 * Nếu user đăng nhập bằng email nhưng tài khoản đó được tạo qua Clerk (`password_hash == null`), hệ thống sẽ trả về `401 Unauthorized` kèm thông báo: *"Tài khoản này được đăng ký qua Google/Clerk. Vui lòng đăng nhập bằng phương thức liên kết."* thay vì bị crash 500 do hàm BCrypt.
 
+### D. Hồ sơ, đổi mật khẩu và khôi phục tài khoản
+* `GET /api/users/profile` và `PUT /api/users/profile` chỉ đọc/cập nhật tài khoản thuộc JWT hiện tại; mọi truy vấn đều loại trừ `deleted_at IS NOT NULL`. Số điện thoại nếu có phải gồm đúng 10 chữ số.
+* `PUT /api/users/change-password` xác minh mật khẩu hiện tại bằng BCrypt, yêu cầu mật khẩu mới tối thiểu 6 ký tự và từ chối tài khoản chỉ đăng nhập qua Clerk.
+* `POST /api/auth/forgot-password` gửi liên kết đặt lại mật khẩu cho tài khoản Local; `POST /api/auth/reset-password` xác minh token một lần trước khi băm/lưu mật khẩu mới. Redis chỉ lưu `SHA-256(token)` làm key, gắn `userId` làm value, TTL 15 phút và cooldown 60 giây theo email. Hai request đồng thời dùng cùng token chỉ có một request tiêu thụ token nguyên tử thành công. Phản hồi không tiết lộ email có tài khoản hay không.
+* Trong Development, `ConsoleEmailSender` in liên kết ra console backend để thử nghiệm. Ngoài Development, không ghi token/link vào log; MailKit gửi thật nếu SMTP đã cấu hình, nếu chưa có cấu hình thì chỉ ghi cảnh báo. Cấu hình SMTP bằng `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_SECURE_SOCKET_OPTIONS`. Không đưa mật khẩu SMTP vào source control.
+* `UserDto` trả thêm `authProvider` và `avatarUrl` để frontend đồng bộ thông tin hồ sơ và hiển thị đúng luồng xác thực.
+
 ---
 
 ## 💻 4. FRONTEND: SERVICE & CONTEXT HOOKS
@@ -171,7 +178,9 @@ Khi clone repo hoặc setup máy mới, cần cấu hình các biến sau:
 ```ini
 JWT_SECRET=super_secret_key_for_dev_1234567890
 CLERK_FRONTEND_API_URL=https://[domain-clerk-của-bạn].clerk.accounts.dev
+CLERK_SECRET_KEY=sk_test_...
 ```
+`CLERK_FRONTEND_API_URL` phải cùng Clerk instance với `VITE_CLERK_PUBLISHABLE_KEY`. Backend dùng `CLERK_SECRET_KEY` để lấy email đã xác thực từ Clerk khi session token không chứa claim email; lấy secret key từ Clerk Dashboard và chỉ lưu trong `Backend/.env`, tuyệt đối không gửi hoặc commit giá trị này.
 
 **Frontend (`Frontend/.env`):**
 ```ini
