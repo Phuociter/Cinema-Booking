@@ -1,0 +1,1437 @@
+
+========== .\Backend\MovieBooking.API\Controllers\MoviesController.cs ==========
+
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.API.Hubs;
+using MovieBooking.Service.DTOs;
+using MovieBooking.Service.Services;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api/movies")]
+public class MoviesController : ControllerBase
+{
+    private static readonly string[] SupportedStatuses =
+        ["now_showing", "coming_soon"];
+
+    private readonly IMovieService _movieService;
+    private readonly IHubContext<MovieHub> _movieHub;
+    private readonly ILogger<MoviesController> _logger;
+
+    public MoviesController(
+        IMovieService movieService,
+        IHubContext<MovieHub> movieHub,
+        ILogger<MoviesController> logger)
+    {
+        _movieService = movieService;
+        _movieHub = movieHub;
+        _logger = logger;
+    }
+
+    // GET: api/movies
+    [HttpGet]
+    public async Task<IActionResult> GetMovies(
+        [FromQuery] string? status,
+        [FromQuery] string? search,
+        [FromQuery] string? genre,
+        [FromQuery] string sortBy = "latest",
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 12,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(status) &&
+            !SupportedStatuses.Contains(
+                status, StringComparer.OrdinalIgnoreCase))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        if (page < 1)
+        {
+            return BadRequest(new
+            {
+                message = "page phải lớn hơn hoặc bằng 1"
+            });
+        }
+
+        if (pageSize is < 1 or > 100)
+        {
+            return BadRequest(new
+            {
+                message = "pageSize phải nằm trong khoảng từ 1 đến 100"
+            });
+        }
+
+        var normalizedSortBy = sortBy.Trim().ToLowerInvariant();
+
+        if (!new[] { "latest", "title", "rating" }.Contains(normalizedSortBy))
+        {
+            return BadRequest(new
+            {
+                message = "sortBy chỉ nhận latest, title hoặc rating"
+            });
+        }
+
+        var result = await _movieService.GetMoviesAsync(
+            status?.ToLowerInvariant(),
+            search,
+            genre,
+            normalizedSortBy,
+            page,
+            pageSize,
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    // GET: api/movies/{id}
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetMovie(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await _movieService.GetMovieByIdAsync(
+            id, cancellationToken);
+
+        return movie is null
+            ? NotFound(new { message = "Không tìm thấy phim" })
+            : Ok(movie);
+    }
+
+    // POST: api/movies
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CreateMovie(
+        [FromBody] CreateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidStatus(request.Status))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        try
+        {
+            var movie = await _movieService.CreateMovieAsync(
+                request, cancellationToken);
+
+            await NotifyMovieChangedAsync(
+                "MovieCreated", movie.Id, movie.Status);
+
+            return CreatedAtAction(
+                nameof(GetMovie),
+                new { id = movie.Id },
+                movie);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // PUT: api/movies/{id}
+    [HttpPut("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateMovie(
+        Guid id,
+        [FromBody] UpdateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidStatus(request.Status))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        try
+        {
+            var movie = await _movieService.UpdateMovieAsync(
+                id, request, cancellationToken);
+
+            if (movie is null)
+            {
+                return NotFound(new
+                {
+                    message = "Không tìm thấy phim"
+                });
+            }
+
+            await NotifyMovieChangedAsync(
+                "MovieUpdated", movie.Id, movie.Status);
+
+            return Ok(movie);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // DELETE: api/movies/{id}
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeleteMovie(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var deleted = await _movieService.SoftDeleteMovieAsync(
+            id, cancellationToken);
+
+        if (!deleted)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy phim"
+            });
+        }
+
+        await NotifyMovieChangedAsync("MovieDeleted", id, null);
+
+        return Ok(new
+        {
+            message = "Đã xóa mềm phim thành công"
+        });
+    }
+
+    private async Task NotifyMovieChangedAsync(
+        string eventName,
+        Guid movieId,
+        string? status)
+    {
+        try
+        {
+            await _movieHub.Clients.All.SendAsync(
+                eventName,
+                new
+                {
+                    id = movieId,
+                    status
+                });
+        }
+        catch (Exception ex)
+        {
+            // Phim đã được lưu; lỗi SignalR không làm API báo thất bại.
+            _logger.LogError(
+                ex,
+                "Không thể gửi sự kiện {EventName} cho phim {MovieId}",
+                eventName,
+                movieId);
+        }
+    }
+
+    private static bool IsValidStatus(string? status) =>
+        !string.IsNullOrWhiteSpace(status) &&
+        SupportedStatuses.Contains(
+            status, StringComparer.OrdinalIgnoreCase);
+}
+
+========== .\Backend\MovieBooking.Service\Services\MovieService.cs ==========
+
+
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data;
+using MovieBooking.Data.Entities;
+using MovieBooking.Service.DTOs;
+
+namespace MovieBooking.Service.Services;
+
+public class MovieService : IMovieService
+{
+    private readonly AppDbContext _dbContext;
+
+    public MovieService(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<MovieListResponse> GetMoviesAsync(
+        string? status,
+        string? search,
+        string? genre,
+        string sortBy,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = BuildMovieQuery(status, search, genre);
+        var totalItems = await query.CountAsync(cancellationToken);
+
+        IOrderedQueryable<Movie> orderedQuery = sortBy switch
+        {
+            "title" => query
+                .OrderBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id),
+
+            "rating" => query
+                .OrderByDescending(movie => movie.RatingScore ?? -1m)
+                .ThenBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id),
+
+            _ => query
+                .OrderByDescending(movie => movie.ReleaseDate)
+                .ThenBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id)
+        };
+
+        var movies = await orderedQuery
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        await PopulateRelationsAsync(movies, cancellationToken);
+
+        return new MovieListResponse
+        {
+            Items = movies.Select(MapMovie).ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalItems = totalItems,
+            TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize)
+        };
+    }
+
+    public async Task<MovieDto?> GetMovieByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await BuildMovieQuery(null, null, null)
+            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (movie is null)
+            return null;
+
+        await PopulateRelationsAsync(new List<Movie> { movie }, cancellationToken);
+        return MapMovie(movie);
+    }
+
+    public async Task<List<GenreDto>> GetGenresAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Genres
+            .AsNoTracking()
+            .OrderBy(genre => genre.Name)
+            .Select(genre => new GenreDto
+            {
+                Id = genre.Id,
+                Name = genre.Name
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<MovieDto> CreateMovieAsync(
+        CreateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMovieRequest(request);
+
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+        var actors = request.Actors
+            .GroupBy(x => x.ActorId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (await _dbContext.Genres.CountAsync(
+            x => genreIds.Contains(x.Id), cancellationToken) != genreIds.Count)
+            throw new ArgumentException("Một hoặc nhiều thể loại không tồn tại.");
+
+        if (await _dbContext.Directors.CountAsync(
+            x => directorIds.Contains(x.Id), cancellationToken) != directorIds.Count)
+            throw new ArgumentException("Một hoặc nhiều đạo diễn không tồn tại.");
+
+        var actorIds = actors.Select(x => x.ActorId).ToList();
+
+        if (await _dbContext.Actors.CountAsync(
+            x => actorIds.Contains(x.Id), cancellationToken) != actorIds.Count)
+            throw new ArgumentException("Một hoặc nhiều diễn viên không tồn tại.");
+
+        var now = DateTime.UtcNow;
+
+        var movie = new Movie
+        {
+            Id = Guid.NewGuid(),
+            Title = request.Title.Trim(),
+            OriginalTitle = request.OriginalTitle,
+            Overview = request.Overview,
+            DurationMin = request.DurationMin,
+            AgeRating = request.AgeRating,
+            PosterUrl = request.PosterUrl,
+            BackdropUrl = request.BackdropUrl,
+            TrailerUrl = request.TrailerUrl,
+            ReleaseDate = request.ReleaseDate,
+            RatingScore = request.RatingScore,
+            Status = request.Status,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        _dbContext.Movies.Add(movie);
+
+        foreach (var genreId in genreIds)
+            _dbContext.MovieGenres.Add(new MovieGenre
+            {
+                MovieId = movie.Id,
+                GenreId = genreId
+            });
+
+        foreach (var directorId in directorIds)
+            _dbContext.MovieDirectors.Add(new MovieDirector
+            {
+                MovieId = movie.Id,
+                DirectorId = directorId
+            });
+
+        foreach (var actor in actors)
+            _dbContext.MovieActors.Add(new MovieActor
+            {
+                MovieId = movie.Id,
+                ActorId = actor.ActorId,
+                CharacterName = actor.CharacterName
+            });
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await PopulateRelationsAsync(new List<Movie> { movie }, cancellationToken);
+        return MapMovie(movie);
+    }
+
+    public async Task<MovieDto?> UpdateMovieAsync(
+        Guid id,
+        UpdateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMovieRequest(request);
+
+        var movie = await _dbContext.Movies
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (movie is null)
+            return null;
+
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+        var actors = request.Actors
+            .GroupBy(x => x.ActorId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (await _dbContext.Genres.CountAsync(
+            x => genreIds.Contains(x.Id), cancellationToken) != genreIds.Count)
+            throw new ArgumentException("Một hoặc nhiều thể loại không tồn tại.");
+
+        if (await _dbContext.Directors.CountAsync(
+            x => directorIds.Contains(x.Id), cancellationToken) != directorIds.Count)
+            throw new ArgumentException("Một hoặc nhiều đạo diễn không tồn tại.");
+
+        var actorIds = actors.Select(x => x.ActorId).ToList();
+
+        if (await _dbContext.Actors.CountAsync(
+            x => actorIds.Contains(x.Id), cancellationToken) != actorIds.Count)
+            throw new ArgumentException("Một hoặc nhiều diễn viên không tồn tại.");
+
+        movie.Title = request.Title.Trim();
+        movie.OriginalTitle = request.OriginalTitle;
+        movie.Overview = request.Overview;
+        movie.DurationMin = request.DurationMin;
+        movie.AgeRating = request.AgeRating;
+        movie.PosterUrl = request.PosterUrl;
+        movie.BackdropUrl = request.BackdropUrl;
+        movie.TrailerUrl = request.TrailerUrl;
+        movie.ReleaseDate = request.ReleaseDate;
+        movie.RatingScore = request.RatingScore;
+        movie.Status = request.Status;
+        movie.UpdatedAt = DateTime.UtcNow;
+
+        var oldGenres = await _dbContext.MovieGenres
+            .Where(x => x.MovieId == id).ToListAsync(cancellationToken);
+        var oldDirectors = await _dbContext.MovieDirectors
+            .Where(x => x.MovieId == id).ToListAsync(cancellationToken);
+        var oldActors = await _dbContext.MovieActors
+            .Where(x => x.MovieId == id).ToListAsync(cancellationToken);
+
+        _dbContext.MovieGenres.RemoveRange(oldGenres);
+        _dbContext.MovieDirectors.RemoveRange(oldDirectors);
+        _dbContext.MovieActors.RemoveRange(oldActors);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var genreId in genreIds)
+            _dbContext.MovieGenres.Add(new MovieGenre
+            {
+                MovieId = id,
+                GenreId = genreId
+            });
+
+        foreach (var directorId in directorIds)
+            _dbContext.MovieDirectors.Add(new MovieDirector
+            {
+                MovieId = id,
+                DirectorId = directorId
+            });
+
+        foreach (var actor in actors)
+            _dbContext.MovieActors.Add(new MovieActor
+            {
+                MovieId = id,
+                ActorId = actor.ActorId,
+                CharacterName = actor.CharacterName
+            });
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        movie.MovieGenres = new List<MovieGenre>();
+        movie.MovieDirectors = new List<MovieDirector>();
+        movie.MovieActors = new List<MovieActor>();
+
+        await PopulateRelationsAsync(new List<Movie> { movie }, cancellationToken);
+        return MapMovie(movie);
+    }
+
+    public async Task<bool> SoftDeleteMovieAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await _dbContext.Movies
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (movie is null)
+            return false;
+
+        movie.DeletedAt = DateTime.UtcNow;
+        movie.UpdatedAt = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private static void ValidateMovieRequest(CreateMovieRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            throw new ArgumentException("Tên phim không được để trống.");
+
+        if (request.DurationMin <= 0)
+            throw new ArgumentException("Thời lượng phim phải lớn hơn 0.");
+
+        if (request.RatingScore is < 0 or > 10)
+            throw new ArgumentException("Điểm đánh giá phải từ 0 đến 10.");
+
+        if (request.GenreIds.Count == 0)
+            throw new ArgumentException("Phải chọn ít nhất một thể loại.");
+
+        if (request.Actors.Any(x => x.ActorId == Guid.Empty))
+            throw new ArgumentException("ID diễn viên không hợp lệ.");
+    }
+
+    private IQueryable<Movie> BuildMovieQuery(
+        string? status,
+        string? search,
+        string? genre)
+    {
+        var query = _dbContext.Movies
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(movie => movie.Status == status);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{search.Trim()}%";
+
+            query = query.Where(movie =>
+                EF.Functions.ILike(movie.Title, pattern) ||
+                (movie.OriginalTitle != null &&
+                 EF.Functions.ILike(movie.OriginalTitle, pattern)) ||
+                movie.MovieGenres.Any(movieGenre =>
+                    EF.Functions.ILike(movieGenre.Genre.Name, pattern)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(genre))
+        {
+            var selectedGenre = genre.Trim();
+
+            query = query.Where(movie =>
+                movie.MovieGenres.Any(movieGenre =>
+                    EF.Functions.ILike(movieGenre.Genre.Name, selectedGenre)));
+        }
+
+        return query;
+    }
+
+    private async Task PopulateRelationsAsync(
+        List<Movie> movies,
+        CancellationToken cancellationToken)
+    {
+        if (movies.Count == 0)
+            return;
+
+        var movieIds = movies.Select(movie => movie.Id).ToHashSet();
+
+        var movieGenres = await _dbContext.MovieGenres
+            .FromSqlRaw("SELECT movie_id, genre_id FROM moviegenres")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var movieDirectors = await _dbContext.MovieDirectors
+            .FromSqlRaw("SELECT movie_id, director_id FROM moviedirectors")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var movieActors = await _dbContext.MovieActors
+            .FromSqlRaw("SELECT movie_id, actor_id, character_name FROM movieactors")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var genreIds = movieGenres.Select(x => x.GenreId).ToHashSet();
+        var directorIds = movieDirectors.Select(x => x.DirectorId).ToHashSet();
+        var actorIds = movieActors.Select(x => x.ActorId).ToHashSet();
+
+        var genres = await _dbContext.Genres
+            .AsNoTracking()
+            .Where(x => genreIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var directors = await _dbContext.Directors
+            .AsNoTracking()
+            .Where(x => directorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var actors = await _dbContext.Actors
+            .AsNoTracking()
+            .Where(x => actorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        foreach (var movie in movies)
+        {
+            movie.MovieGenres = movieGenres
+                .Where(x => x.MovieId == movie.Id && genres.ContainsKey(x.GenreId))
+                .Select(x => new MovieGenre
+                {
+                    MovieId = x.MovieId,
+                    GenreId = x.GenreId,
+                    Genre = genres[x.GenreId]
+                })
+                .ToList();
+
+            movie.MovieDirectors = movieDirectors
+                .Where(x => x.MovieId == movie.Id && directors.ContainsKey(x.DirectorId))
+                .Select(x => new MovieDirector
+                {
+                    MovieId = x.MovieId,
+                    DirectorId = x.DirectorId,
+                    Director = directors[x.DirectorId]
+                })
+                .ToList();
+
+            movie.MovieActors = movieActors
+                .Where(x => x.MovieId == movie.Id && actors.ContainsKey(x.ActorId))
+                .Select(x => new MovieActor
+                {
+                    MovieId = x.MovieId,
+                    ActorId = x.ActorId,
+                    CharacterName = x.CharacterName,
+                    Actor = actors[x.ActorId]
+                })
+                .ToList();
+        }
+    }
+
+    private static MovieDto MapMovie(Movie movie)
+    {
+        return new MovieDto
+        {
+            Id = movie.Id,
+            Title = movie.Title,
+            OriginalTitle = movie.OriginalTitle,
+            Overview = movie.Overview,
+            DurationMin = movie.DurationMin,
+            AgeRating = movie.AgeRating,
+            PosterUrl = movie.PosterUrl,
+            BackdropUrl = movie.BackdropUrl,
+            TrailerUrl = movie.TrailerUrl,
+            ReleaseDate = movie.ReleaseDate,
+            RatingScore = movie.RatingScore,
+            Status = movie.Status,
+            Genres = movie.MovieGenres
+                .OrderBy(x => x.Genre.Name)
+                .Select(x => x.Genre.Name)
+                .ToList(),
+            Directors = movie.MovieDirectors
+                .OrderBy(x => x.Director.Name)
+                .Select(x => x.Director.Name)
+                .ToList(),
+            Actors = movie.MovieActors
+                .OrderBy(x => x.Actor.Name)
+                .Select(x => new MovieActorDto
+                {
+                    ActorId = x.ActorId,
+                    Name = x.Actor.Name,
+                    ProfilePath = x.Actor.ProfilePath,
+                    CharacterName = x.CharacterName
+                })
+                .ToList()
+        };
+    }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\AppDbContext.cs ==========
+
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data.Entities;
+
+namespace MovieBooking.Data;
+
+public class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<Movie> Movies => Set<Movie>();
+    public DbSet<Genre> Genres => Set<Genre>();
+    public DbSet<MovieGenre> MovieGenres => Set<MovieGenre>();
+    public DbSet<Director> Directors => Set<Director>();
+    public DbSet<MovieDirector> MovieDirectors => Set<MovieDirector>();
+    public DbSet<Actor> Actors => Set<Actor>();
+    public DbSet<MovieActor> MovieActors => Set<MovieActor>();
+    public DbSet<Cinema> Cinemas => Set<Cinema>();
+    public DbSet<Auditorium> Auditoriums => Set<Auditorium>();
+    public DbSet<SeatType> SeatTypes => Set<SeatType>();
+    public DbSet<Seat> Seats => Set<Seat>();
+    public DbSet<Showtime> Showtimes => Set<Showtime>();
+    public DbSet<ShowtimeSeat> ShowtimeSeats => Set<ShowtimeSeat>();
+    public DbSet<Snack> Snacks => Set<Snack>();
+    public DbSet<CinemaSnack> CinemaSnacks => Set<CinemaSnack>();
+    public DbSet<Booking> Bookings => Set<Booking>();
+    public DbSet<Ticket> Tickets => Set<Ticket>();
+    public DbSet<BookingSnack> BookingSnacks => Set<BookingSnack>();
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<Payment> Payments => Set<Payment>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<MovieGenre>().ToTable("moviegenres");
+        modelBuilder.Entity<MovieDirector>().ToTable("moviedirectors");
+        modelBuilder.Entity<MovieActor>().ToTable("movieactors");
+        modelBuilder.Entity<UserRole>().ToTable("userroles");
+
+        // Composite Keys
+        modelBuilder.Entity<MovieGenre>().HasKey(x => new { x.MovieId, x.GenreId });
+        modelBuilder.Entity<MovieDirector>().HasKey(x => new { x.MovieId, x.DirectorId });
+        modelBuilder.Entity<MovieActor>().HasKey(x => new { x.MovieId, x.ActorId });
+        modelBuilder.Entity<UserRole>().HasKey(x => new { x.UserId, x.RoleId });
+
+        // Unique Constraints & Indexes
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.SeatCode })
+            .IsUnique();
+
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.RowLabel, x.ColumnNumber })
+            .IsUnique();
+
+        modelBuilder.Entity<ShowtimeSeat>()
+            .HasIndex(x => new { x.ShowtimeId, x.SeatId })
+            .IsUnique();
+
+        modelBuilder.Entity<Ticket>()
+            .HasIndex(x => x.ShowtimeSeatId)
+            .IsUnique();
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasIndex(x => new { x.CinemaId, x.SnackId })
+            .IsUnique();
+
+        modelBuilder.Entity<Booking>()
+            .HasIndex(x => x.BookingCode)
+            .IsUnique();
+
+        // Partial unique index for active users only
+        modelBuilder.Entity<User>()
+            .HasIndex(x => x.Email)
+            .IsUnique()
+            .HasFilter("\"deleted_at\" IS NULL");
+
+        // Relationships & Delete Behaviors
+        modelBuilder.Entity<Booking>()
+            .HasOne(b => b.User)
+            .WithMany(u => u.Bookings)
+            .HasForeignKey(b => b.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Payment>()
+            .HasOne(p => p.Booking)
+            .WithMany(b => b.Payments)
+            .HasForeignKey(p => p.BookingId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Auditorium>()
+            .HasOne(a => a.Cinema)
+            .WithMany(c => c.Auditoriums)
+            .HasForeignKey(a => a.CinemaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Showtime>()
+            .HasOne(s => s.Movie)
+            .WithMany(m => m.Showtimes)
+            .HasForeignKey(s => s.MovieId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Showtime>()
+            .HasOne(s => s.Auditorium)
+            .WithMany(a => a.Showtimes)
+            .HasForeignKey(s => s.AuditoriumId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Seat>()
+            .HasOne(s => s.SeatType)
+            .WithMany(st => st.Seats)
+            .HasForeignKey(s => s.SeatTypeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Ticket>()
+            .HasOne(t => t.ShowtimeSeat)
+            .WithOne(ss => ss.Ticket)
+            .HasForeignKey<Ticket>(t => t.ShowtimeSeatId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasOne(cs => cs.Cinema)
+            .WithMany(c => c.CinemaSnacks)
+            .HasForeignKey(cs => cs.CinemaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasOne(cs => cs.Snack)
+            .WithMany(s => s.CinemaSnacks)
+            .HasForeignKey(cs => cs.SnackId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<BookingSnack>()
+            .HasOne(bs => bs.CinemaSnack)
+            .WithMany(cs => cs.BookingSnacks)
+            .HasForeignKey(bs => bs.CinemaSnackId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // JSONB column mapping for Payment.Metadata
+        modelBuilder.Entity<Payment>()
+            .Property(p => p.Metadata)
+            .HasColumnType("jsonb");
+
+        // Global Query Filters for the 7 Soft-Deletable entities
+        modelBuilder.Entity<User>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Movie>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Cinema>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Auditorium>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Snack>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<CinemaSnack>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<SeatType>().HasQueryFilter(x => x.DeletedAt == null);
+
+        // Chuẩn hóa tên bảng sang lowercase và tên cột sang snake_case tương thích PostgreSQL
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            var tableName = entity.GetTableName();
+            if (!string.IsNullOrEmpty(tableName))
+            {
+                entity.SetTableName(tableName.ToLower());
+            }
+
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
+    }
+
+    private static string ToSnakeCase(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        return System.Text.RegularExpressions.Regex.Replace(input, @"([a-z0-9])([A-Z])", "$1_$2").ToLower();
+    }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Constants\ShowtimeStatus.cs ==========
+
+namespace MovieBooking.Data.Constants;
+
+public static class ShowtimeStatus
+{
+    public const string Scheduled = "scheduled";
+    public const string Cancelled = "cancelled";
+    public const string Completed = "completed";
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Cinema.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class Cinema : ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Address { get; set; }
+    public string? City { get; set; }
+    public string? Hotline { get; set; }
+    public string? ImageUrl { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
+    public ICollection<Auditorium> Auditoriums { get; set; } = new List<Auditorium>();
+    public ICollection<CinemaSnack> CinemaSnacks { get; set; } = new List<CinemaSnack>();
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\CinemaSnack.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class CinemaSnack : ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public Guid CinemaId { get; set; }
+    public Cinema Cinema { get; set; } = null!;
+    public Guid SnackId { get; set; }
+    public Snack Snack { get; set; } = null!;
+    public decimal Price { get; set; }
+    public bool IsAvailable { get; set; } = true;
+    public DateTime? DeletedAt { get; set; }
+
+    public ICollection<BookingSnack> BookingSnacks { get; set; } = new List<BookingSnack>();
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Movie.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class Movie : ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? OriginalTitle { get; set; }
+    public string? Overview { get; set; }
+    public int DurationMin { get; set; }
+    public string? AgeRating { get; set; }
+    public string? PosterUrl { get; set; }
+    public string? BackdropUrl { get; set; }
+    public string? TrailerUrl { get; set; }
+    public DateOnly? ReleaseDate { get; set; }
+    public decimal? RatingScore { get; set; }
+    public string Status { get; set; } = "coming_soon";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
+    public ICollection<MovieGenre> MovieGenres { get; set; } = new List<MovieGenre>();
+    public ICollection<MovieDirector> MovieDirectors { get; set; } = new List<MovieDirector>();
+    public ICollection<MovieActor> MovieActors { get; set; } = new List<MovieActor>();
+    public ICollection<Showtime> Showtimes { get; set; } = new List<Showtime>();
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\MovieActor.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class MovieActor
+{
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid ActorId { get; set; }
+    public Actor Actor { get; set; } = null!;
+    public string? CharacterName { get; set; }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\MovieDirector.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class MovieDirector
+{
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid DirectorId { get; set; }
+    public Director Director { get; set; } = null!;
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\MovieGenre.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class MovieGenre
+{
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid GenreId { get; set; }
+    public Genre Genre { get; set; } = null!;
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Showtime.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class Showtime
+{
+    public Guid Id { get; set; }
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid AuditoriumId { get; set; }
+    public Auditorium Auditorium { get; set; } = null!;
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public decimal BasePrice { get; set; }
+    public string Status { get; set; } = "scheduled"; // scheduled, cancelled, completed
+    public DateTime CreatedAt { get; set; }
+
+    public ICollection<ShowtimeSeat> ShowtimeSeats { get; set; } = new List<ShowtimeSeat>();
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\ShowtimeSeat.cs ==========
+
+namespace MovieBooking.Data.Entities;
+
+public class ShowtimeSeat
+{
+    public Guid Id { get; set; }
+    public Guid ShowtimeId { get; set; }
+    public Showtime Showtime { get; set; } = null!;
+    public Guid SeatId { get; set; }
+    public Seat Seat { get; set; } = null!;
+    public string Status { get; set; } = "available"; // available, reserved
+
+    public Ticket? Ticket { get; set; }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Debug\net8.0\MovieBooking.Data.AssemblyInfo.cs ==========
+
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e96709bd61a682f42105d7ab5e8a0dbe942d73a2")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Debug\net8.0\MovieBooking.Data.GlobalUsings.g.cs ==========
+
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Release\net8.0\MovieBooking.Data.AssemblyInfo.cs ==========
+
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//     Runtime Version:4.0.30319.42000
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+58ad7bca2ce05a1e82b932a38cf51909a38d07dd")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Release\net8.0\MovieBooking.Data.GlobalUsings.g.cs ==========
+
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\ShowtimeRepository.cs ==========
+
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data.Constants;
+using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories.Interfaces;
+
+namespace MovieBooking.Data.Repositories;
+
+public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeRepository
+{
+    public ShowtimeRepository(AppDbContext context) : base(context)
+    {
+    }
+
+    public async Task<(IEnumerable<Showtime> Items, int TotalCount)> GetShowtimesWithDetailsAsync(
+        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom = null, DateOnly? dateTo = null, int page = 1, int pageSize = 20)
+    {
+        var query = GetBaseShowtimeQuery()
+            .Where(s => s.Status == ShowtimeStatus.Scheduled);
+
+        query = ApplyShowtimeFilters(query, movieId, cinemaId, date, dateFrom, dateTo);
+
+        var totalCount = await query.CountAsync();
+
+        var items = await query
+            .OrderBy(s => s.StartTime)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return (items, totalCount);
+    }
+
+    public async Task<Showtime?> GetShowtimeByIdWithDetailsAsync(Guid id)
+    {
+        return await GetBaseShowtimeQuery()
+            .FirstOrDefaultAsync(s => s.Id == id);
+    }
+
+    public async Task<bool> ExistsAsync(Guid id, bool scheduledOnly = true)
+    {
+        return await _dbSet.AnyAsync(s => s.Id == id && (!scheduledOnly || s.Status == ShowtimeStatus.Scheduled));
+    }
+
+    private IQueryable<Showtime> GetBaseShowtimeQuery()
+    {
+        return _dbSet
+            .AsNoTracking()
+            .Include(s => s.Movie)
+            .Include(s => s.Auditorium)
+                .ThenInclude(a => a.Cinema);
+    }
+
+    private IQueryable<Showtime> ApplyShowtimeFilters(
+        IQueryable<Showtime> query,
+        Guid? movieId,
+        Guid? cinemaId,
+        DateOnly? date,
+        DateOnly? dateFrom,
+        DateOnly? dateTo)
+    {
+        query = ApplyMovieFilter(query, movieId);
+        query = ApplyCinemaFilter(query, cinemaId);
+        query = ApplyDateFilter(query, date, dateFrom, dateTo);
+        return query;
+    }
+
+    private IQueryable<Showtime> ApplyMovieFilter(IQueryable<Showtime> query, Guid? movieId)
+    {
+        return movieId.HasValue ? query.Where(s => s.MovieId == movieId.Value) : query;
+    }
+
+    private IQueryable<Showtime> ApplyCinemaFilter(IQueryable<Showtime> query, Guid? cinemaId)
+    {
+        return cinemaId.HasValue ? query.Where(s => s.Auditorium.CinemaId == cinemaId.Value) : query;
+    }
+
+    private IQueryable<Showtime> ApplyDateFilter(
+        IQueryable<Showtime> query,
+        DateOnly? date,
+        DateOnly? dateFrom,
+        DateOnly? dateTo)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        if (date.HasValue)
+        {
+            var startOfDayUtc = date.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var effectiveStartUtc = startOfDayUtc < nowUtc ? nowUtc : startOfDayUtc;
+            var endOfDayUtc = startOfDayUtc.AddDays(1);
+            return query.Where(s => s.StartTime >= effectiveStartUtc && s.StartTime < endOfDayUtc);
+        }
+
+        if (dateFrom.HasValue || dateTo.HasValue)
+        {
+            if (dateFrom.HasValue)
+            {
+                var fromUtc = dateFrom.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                var effectiveFromUtc = fromUtc < nowUtc ? nowUtc : fromUtc;
+                query = query.Where(s => s.StartTime >= effectiveFromUtc);
+            }
+            else
+            {
+                query = query.Where(s => s.StartTime >= nowUtc);
+            }
+
+            if (dateTo.HasValue)
+            {
+                var toUtc = dateTo.Value.ToDateTime(new TimeOnly(23, 59, 59, 999), DateTimeKind.Utc);
+                query = query.Where(s => s.StartTime <= toUtc);
+            }
+
+            return query;
+        }
+
+        return query.Where(s => s.StartTime >= nowUtc);
+    }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\ShowtimeSeatRepository.cs ==========
+
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories.Interfaces;
+
+namespace MovieBooking.Data.Repositories;
+
+public class ShowtimeSeatRepository : GenericRepository<ShowtimeSeat>, IShowtimeSeatRepository
+{
+    public ShowtimeSeatRepository(AppDbContext context) : base(context)
+    {
+    }
+
+    public async Task<IEnumerable<ShowtimeSeat>> GetSeatsByShowtimeIdAsync(Guid showtimeId)
+    {
+        return await GetBaseShowtimeSeatQuery()
+            .Where(ss => ss.ShowtimeId == showtimeId)
+            .OrderBy(ss => ss.Seat.RowLabel)
+            .ThenBy(ss => ss.Seat.ColumnNumber)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<ShowtimeSeat>> GetAvailableSeatsAsync(Guid showtimeId, IEnumerable<Guid> seatIds)
+    {
+        var seatIdList = seatIds.ToList();
+        return await _dbSet
+            .AsNoTracking()
+            .Where(ss => ss.ShowtimeId == showtimeId
+                      && seatIdList.Contains(ss.SeatId)
+                      && ss.Status == "available")
+            .ToListAsync();
+    }
+
+    private IQueryable<ShowtimeSeat> GetBaseShowtimeSeatQuery()
+    {
+        return _dbSet
+            .AsNoTracking()
+            .Include(ss => ss.Showtime)
+            .Include(ss => ss.Seat)
+                .ThenInclude(s => s.SeatType);
+    }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\Interfaces\IShowtimeRepository.cs ==========
+
+using MovieBooking.Data.Entities;
+
+namespace MovieBooking.Data.Repositories.Interfaces;
+
+public interface IShowtimeRepository : IGenericRepository<Showtime>
+{
+    Task<(IEnumerable<Showtime> Items, int TotalCount)> GetShowtimesWithDetailsAsync(
+        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom = null, DateOnly? dateTo = null, int page = 1, int pageSize = 20);
+    Task<Showtime?> GetShowtimeByIdWithDetailsAsync(Guid id);
+    Task<bool> ExistsAsync(Guid id, bool scheduledOnly = true);
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\Interfaces\IShowtimeSeatRepository.cs ==========
+
+using MovieBooking.Data.Entities;
+
+namespace MovieBooking.Data.Repositories.Interfaces;
+
+public interface IShowtimeSeatRepository : IGenericRepository<ShowtimeSeat>
+{
+    Task<IEnumerable<ShowtimeSeat>> GetSeatsByShowtimeIdAsync(Guid showtimeId);
+    Task<IEnumerable<ShowtimeSeat>> GetAvailableSeatsAsync(Guid showtimeId, IEnumerable<Guid> seatIds);
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Controllers\CinemasController.cs ==========
+
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.Service.Services;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api")]
+public class CinemasController : ControllerBase
+{
+    private readonly ICinemaService _cinemaService;
+
+    public CinemasController(ICinemaService cinemaService)
+    {
+        _cinemaService = cinemaService;
+    }
+
+    // GET /api/cinemas
+    // GET /api/cinemas?city=Ho Chi Minh
+    [HttpGet("cinemas")]
+    public async Task<IActionResult> GetCinemas([FromQuery] string? city = null)
+    {
+        var cinemas = await _cinemaService.GetCinemasAsync(city);
+
+        return Ok(cinemas);
+    }
+
+    // GET /api/cinemas/{id}
+    [HttpGet("cinemas/{id:guid}")]
+    public async Task<IActionResult> GetCinemaById(Guid id)
+    {
+        var cinema = await _cinemaService.GetCinemaByIdAsync(id);
+
+        if (cinema == null)
+        {
+            return NotFound(new
+            {
+                message = "Cinema not found"
+            });
+        }
+
+        return Ok(cinema);
+    }
+
+    // GET /api/auditoriums/{id}/seats
+    [HttpGet("auditoriums/{id:guid}/seats")]
+    public async Task<IActionResult> GetSeats(Guid id)
+    {
+        var seats = await _cinemaService.GetSeatsByAuditoriumIdAsync(id);
+
+        return Ok(seats);
+    }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Controllers\ShowtimesController.cs ==========
+
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.Service.DTOs;
+using MovieBooking.Service.Interfaces;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api/showtimes")]
+public class ShowtimesController : ControllerBase
+{
+    private readonly IScheduleService _scheduleService;
+
+    public ShowtimesController(IScheduleService scheduleService)
+    {
+        _scheduleService = scheduleService;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<PagedResult<ShowtimeDto>>> GetShowtimes(
+        [FromQuery] Guid? movieId,
+        [FromQuery] Guid? cinemaId,
+        [FromQuery] DateOnly? date,
+        [FromQuery] DateOnly? dateFrom,
+        [FromQuery] DateOnly? dateTo,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        var result = await _scheduleService.GetShowtimesAsync(movieId, cinemaId, date, dateFrom, dateTo, page, pageSize);
+        return Ok(result);
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<ShowtimeDto>> GetShowtimeById(Guid id)
+    {
+        var showtime = await _scheduleService.GetShowtimeByIdAsync(id);
+        if (showtime == null)
+        {
+            return NotFound(new { message = $"Không tìm thấy suất chiếu với ID: {id}" });
+        }
+
+        return Ok(showtime);
+    }
+
+    [HttpGet("{id:guid}/seats")]
+    public async Task<ActionResult<IEnumerable<ShowtimeSeatDto>>> GetShowtimeSeats(Guid id)
+    {
+        if (!await _scheduleService.ShowtimeExistsAsync(id))
+        {
+            return NotFound(new { message = $"Không tìm thấy suất chiếu với ID: {id}" });
+        }
+
+        var seats = await _scheduleService.GetSeatsForShowtimeAsync(id);
+        return Ok(seats);
+    }
+}
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Interfaces\IMovieService.cs ==========
+
+// File này để trống để tránh lỗi CS0104 Ambiguous Reference giữa MovieBooking.Service.Interfaces và MovieBooking.Service.Services
+
+========== D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Services\IMovieService.cs ==========
+
+
+using MovieBooking.Service.DTOs;
+
+namespace MovieBooking.Service.Services;
+
+public interface IMovieService
+{
+    Task<MovieListResponse> GetMoviesAsync(
+        string? status,
+        string? search,
+        string? genre,
+        string sortBy,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto?> GetMovieByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
+    Task<List<GenreDto>> GetGenresAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto> CreateMovieAsync(
+        CreateMovieRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto?> UpdateMovieAsync(
+        Guid id,
+        UpdateMovieRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> SoftDeleteMovieAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+}

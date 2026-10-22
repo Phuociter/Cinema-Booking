@@ -1,0 +1,2392 @@
+﻿KIỂM TRA TÍNH NĂNG LỌC PHIM THEO THÀNH PHỐ VÀ CỤM RẠP
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Controllers\CinemasController.cs
+================================================================================
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.Service.Services;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api")]
+public class CinemasController : ControllerBase
+{
+    private readonly ICinemaService _cinemaService;
+
+    public CinemasController(ICinemaService cinemaService)
+    {
+        _cinemaService = cinemaService;
+    }
+
+    // GET /api/cinemas
+    // GET /api/cinemas?city=Ho Chi Minh
+    [HttpGet("cinemas")]
+    public async Task<IActionResult> GetCinemas([FromQuery] string? city = null)
+    {
+        var cinemas = await _cinemaService.GetCinemasAsync(city);
+
+        return Ok(cinemas);
+    }
+
+    // GET /api/cinemas/{id}
+    [HttpGet("cinemas/{id:guid}")]
+    public async Task<IActionResult> GetCinemaById(Guid id)
+    {
+        var cinema = await _cinemaService.GetCinemaByIdAsync(id);
+
+        if (cinema == null)
+        {
+            return NotFound(new
+            {
+                message = "Cinema not found"
+            });
+        }
+
+        return Ok(cinema);
+    }
+
+    // GET /api/auditoriums/{id}/seats
+    [HttpGet("auditoriums/{id:guid}/seats")]
+    public async Task<IActionResult> GetSeats(Guid id)
+    {
+        var seats = await _cinemaService.GetSeatsByAuditoriumIdAsync(id);
+
+        return Ok(seats);
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Controllers\MoviesController.cs
+================================================================================
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.API.Hubs;
+using MovieBooking.Service.DTOs;
+using MovieBooking.Service.Services;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api/movies")]
+public class MoviesController : ControllerBase
+{
+    private static readonly string[] SupportedStatuses =
+        ["now_showing", "coming_soon"];
+
+    private readonly IMovieService _movieService;
+    private readonly IHubContext<MovieHub> _movieHub;
+    private readonly ILogger<MoviesController> _logger;
+
+    public MoviesController(
+        IMovieService movieService,
+        IHubContext<MovieHub> movieHub,
+        ILogger<MoviesController> logger)
+    {
+        _movieService = movieService;
+        _movieHub = movieHub;
+        _logger = logger;
+    }
+
+    // GET: api/movies
+    [HttpGet]
+    public async Task<IActionResult> GetMovies(
+    [FromQuery] string? status,
+    [FromQuery] string? search,
+    [FromQuery] string? genre,
+    [FromQuery] string sortBy = "latest",
+    [FromQuery] string? city = null,
+    [FromQuery] Guid? cinemaId = null,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 12,
+    CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(status) &&
+            !SupportedStatuses.Contains(
+                status, StringComparer.OrdinalIgnoreCase))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        if (page < 1)
+        {
+            return BadRequest(new
+            {
+                message = "page phải lớn hơn hoặc bằng 1"
+            });
+        }
+
+        if (pageSize is < 1 or > 100)
+        {
+            return BadRequest(new
+            {
+                message = "pageSize phải nằm trong khoảng từ 1 đến 100"
+            });
+        }
+
+        var normalizedSortBy = sortBy.Trim().ToLowerInvariant();
+
+        if (!new[] { "latest", "title", "rating" }.Contains(normalizedSortBy))
+        {
+            return BadRequest(new
+            {
+                message = "sortBy chỉ nhận latest, title hoặc rating"
+            });
+        }
+
+        var result = await _movieService.GetMoviesAsync(
+    status?.ToLowerInvariant(),
+    search,
+    genre,
+    normalizedSortBy,
+    string.IsNullOrWhiteSpace(city) ? null : city.Trim(),
+    cinemaId,
+    page,
+    pageSize,
+    cancellationToken);
+
+        return Ok(result);
+    }
+
+    // GET: api/movies/{id}
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetMovie(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await _movieService.GetMovieByIdAsync(
+            id, cancellationToken);
+
+        return movie is null
+            ? NotFound(new { message = "Không tìm thấy phim" })
+            : Ok(movie);
+    }
+
+    // POST: api/movies
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CreateMovie(
+        [FromBody] CreateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidStatus(request.Status))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        try
+        {
+            var movie = await _movieService.CreateMovieAsync(
+                request, cancellationToken);
+
+            await NotifyMovieChangedAsync(
+                "MovieCreated", movie.Id, movie.Status);
+
+            return CreatedAtAction(
+                nameof(GetMovie),
+                new { id = movie.Id },
+                movie);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // PUT: api/movies/{id}
+    [HttpPut("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateMovie(
+        Guid id,
+        [FromBody] UpdateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidStatus(request.Status))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        try
+        {
+            var movie = await _movieService.UpdateMovieAsync(
+                id, request, cancellationToken);
+
+            if (movie is null)
+            {
+                return NotFound(new
+                {
+                    message = "Không tìm thấy phim"
+                });
+            }
+
+            await NotifyMovieChangedAsync(
+                "MovieUpdated", movie.Id, movie.Status);
+
+            return Ok(movie);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // DELETE: api/movies/{id}
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeleteMovie(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var deleted = await _movieService.SoftDeleteMovieAsync(
+            id, cancellationToken);
+
+        if (!deleted)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy phim"
+            });
+        }
+
+        await NotifyMovieChangedAsync("MovieDeleted", id, null);
+
+        return Ok(new
+        {
+            message = "Đã xóa mềm phim thành công"
+        });
+    }
+
+    private async Task NotifyMovieChangedAsync(
+        string eventName,
+        Guid movieId,
+        string? status)
+    {
+        try
+        {
+            await _movieHub.Clients.All.SendAsync(
+                eventName,
+                new
+                {
+                    id = movieId,
+                    status
+                });
+        }
+        catch (Exception ex)
+        {
+            // Phim đã được lưu; lỗi SignalR không làm API báo thất bại.
+            _logger.LogError(
+                ex,
+                "Không thể gửi sự kiện {EventName} cho phim {MovieId}",
+                eventName,
+                movieId);
+        }
+    }
+
+    private static bool IsValidStatus(string? status) =>
+        !string.IsNullOrWhiteSpace(status) &&
+        SupportedStatuses.Contains(
+            status, StringComparer.OrdinalIgnoreCase);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Controllers\ShowtimesController.cs
+================================================================================
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.Service.DTOs;
+using MovieBooking.Service.Interfaces;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api/showtimes")]
+public class ShowtimesController : ControllerBase
+{
+    private readonly IScheduleService _scheduleService;
+
+    public ShowtimesController(IScheduleService scheduleService)
+    {
+        _scheduleService = scheduleService;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<PagedResult<ShowtimeDto>>> GetShowtimes(
+        [FromQuery] Guid? movieId,
+        [FromQuery] Guid? cinemaId,
+        [FromQuery] DateOnly? date,
+        [FromQuery] DateOnly? dateFrom,
+        [FromQuery] DateOnly? dateTo,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        var result = await _scheduleService.GetShowtimesAsync(movieId, cinemaId, date, dateFrom, dateTo, page, pageSize);
+        return Ok(result);
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<ShowtimeDto>> GetShowtimeById(Guid id)
+    {
+        var showtime = await _scheduleService.GetShowtimeByIdAsync(id);
+        if (showtime == null)
+        {
+            return NotFound(new { message = $"Không tìm thấy suất chiếu với ID: {id}" });
+        }
+
+        return Ok(showtime);
+    }
+
+    [HttpGet("{id:guid}/seats")]
+    public async Task<ActionResult<IEnumerable<ShowtimeSeatDto>>> GetShowtimeSeats(Guid id)
+    {
+        if (!await _scheduleService.ShowtimeExistsAsync(id))
+        {
+            return NotFound(new { message = $"Không tìm thấy suất chiếu với ID: {id}" });
+        }
+
+        var seats = await _scheduleService.GetSeatsForShowtimeAsync(id);
+        return Ok(seats);
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Cinema.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class Cinema : ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Address { get; set; }
+    public string? City { get; set; }
+    public string? Hotline { get; set; }
+    public string? ImageUrl { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
+    public ICollection<Auditorium> Auditoriums { get; set; } = new List<Auditorium>();
+    public ICollection<CinemaSnack> CinemaSnacks { get; set; } = new List<CinemaSnack>();
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\CinemaSnack.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class CinemaSnack : ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public Guid CinemaId { get; set; }
+    public Cinema Cinema { get; set; } = null!;
+    public Guid SnackId { get; set; }
+    public Snack Snack { get; set; } = null!;
+    public decimal Price { get; set; }
+    public bool IsAvailable { get; set; } = true;
+    public DateTime? DeletedAt { get; set; }
+
+    public ICollection<BookingSnack> BookingSnacks { get; set; } = new List<BookingSnack>();
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Showtime.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class Showtime
+{
+    public Guid Id { get; set; }
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid AuditoriumId { get; set; }
+    public Auditorium Auditorium { get; set; } = null!;
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public decimal BasePrice { get; set; }
+    public string Status { get; set; } = "scheduled"; // scheduled, cancelled, completed
+    public DateTime CreatedAt { get; set; }
+
+    public ICollection<ShowtimeSeat> ShowtimeSeats { get; set; } = new List<ShowtimeSeat>();
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\ShowtimeSeat.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class ShowtimeSeat
+{
+    public Guid Id { get; set; }
+    public Guid ShowtimeId { get; set; }
+    public Showtime Showtime { get; set; } = null!;
+    public Guid SeatId { get; set; }
+    public Seat Seat { get; set; } = null!;
+    public string Status { get; set; } = "available"; // available, reserved
+
+    public Ticket? Ticket { get; set; }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\DTOs\CinemaDtos.cs
+================================================================================
+namespace MovieBooking.Service.DTOs;
+
+public class CinemaDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Address { get; set; }
+    public string? City { get; set; }
+    public string? Hotline { get; set; }
+    public string? ImageUrl { get; set; }
+    public List<AuditoriumDto> Auditoriums { get; set; } = new();
+}
+
+public class AuditoriumDto
+{
+    public Guid Id { get; set; }
+    public Guid CinemaId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string HallType { get; set; } = "2D";
+    public int? TotalRows { get; set; }
+    public int? TotalColumns { get; set; }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\DTOs\CinemaSnackDto.cs
+================================================================================
+namespace MovieBooking.Service.DTOs.Snack
+{
+	public class CinemaSnackDto
+	{
+		public Guid Id { get; set; }
+		public Guid CinemaId { get; set; }
+		public Guid SnackId { get; set; }
+		public string Name { get; set; } = null!;
+		public string? ImageUrl { get; set; }
+		public string? Description { get; set; }
+		public decimal Price { get; set; }
+		public bool IsAvailable { get; set; }
+	}
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\DTOs\ShowtimeDtos.cs
+================================================================================
+namespace MovieBooking.Service.DTOs;
+
+public class ShowtimeDto
+{
+    public Guid Id { get; set; }
+    public Guid MovieId { get; set; }
+    public string MovieTitle { get; set; } = string.Empty;
+    public string? PosterUrl { get; set; }
+    public Guid AuditoriumId { get; set; }
+    public string AuditoriumName { get; set; } = string.Empty;
+    public Guid CinemaId { get; set; }
+    public string CinemaName { get; set; } = string.Empty;
+    public string? City { get; set; }
+    public string? Address { get; set; }
+    public string? HallType { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public decimal BasePrice { get; set; }
+    public string Status { get; set; } = string.Empty;
+}
+
+public class ShowtimeSeatDto
+{
+    public Guid Id { get; set; }
+    public Guid ShowtimeId { get; set; }
+    public Guid SeatId { get; set; }
+    public string RowLabel { get; set; } = string.Empty;
+    public int ColumnNumber { get; set; }
+    public string SeatCode { get; set; } = string.Empty;
+    public string SeatTypeName { get; set; } = string.Empty;
+    public string ColorCode { get; set; } = string.Empty;
+    public decimal ExtraPrice { get; set; }
+    public decimal TotalPrice { get; set; }
+    public string Status { get; set; } = "available"; // available, reserved
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Interfaces\IMovieService.cs
+================================================================================
+// File này để trống để tránh lỗi CS0104 Ambiguous Reference giữa MovieBooking.Service.Interfaces và MovieBooking.Service.Services
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Services\CinemaService.cs
+================================================================================
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data;
+using MovieBooking.Service.DTOs;
+using System.Data;
+using System.Data.Common;
+
+namespace MovieBooking.Service.Services;
+
+public class CinemaService : ICinemaService
+{
+    private readonly AppDbContext _context;
+
+    public CinemaService(AppDbContext context)
+    {
+        _context = context;
+    }
+
+    // GET /api/cinemas?city=...
+    public async Task<List<CinemaDto>> GetCinemasAsync(string? city = null)
+    {
+        var connection = _context.Database.GetDbConnection();
+
+        try
+        {
+            if (connection.State != ConnectionState.Open)
+            {
+                await connection.OpenAsync();
+            }
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText = @"
+                SELECT
+                    c.id AS cinema_id,
+                    c.name AS cinema_name,
+                    c.address,
+                    c.city,
+                    c.hotline,
+                    c.image_url,
+                    a.id AS auditorium_id,
+                    a.cinema_id,
+                    a.name AS auditorium_name,
+                    a.hall_type,
+                    a.total_rows,
+                    a.total_columns
+                FROM cinemas c
+                LEFT JOIN auditoriums a
+                    ON a.cinema_id = c.id
+                    AND a.deleted_at IS NULL
+                WHERE c.deleted_at IS NULL
+                    AND (@city::varchar IS NULL OR c.city = @city)
+                ORDER BY c.name, a.name;
+            ";
+
+            var cityParameter = command.CreateParameter();
+            cityParameter.ParameterName = "@city";
+            cityParameter.Value = string.IsNullOrWhiteSpace(city)
+                ? DBNull.Value
+                : city;
+
+            command.Parameters.Add(cityParameter);
+
+            using var reader = await command.ExecuteReaderAsync();
+
+            var cinemas = new List<CinemaDto>();
+
+            while (await reader.ReadAsync())
+            {
+                var cinemaId = reader.GetGuid(reader.GetOrdinal("cinema_id"));
+
+                var cinema = cinemas.FirstOrDefault(c => c.Id == cinemaId);
+
+                if (cinema == null)
+                {
+                    cinema = new CinemaDto
+                    {
+                        Id = cinemaId,
+                        Name = reader.GetString(reader.GetOrdinal("cinema_name")),
+                        Address = reader.IsDBNull(reader.GetOrdinal("address"))
+                            ? null
+                            : reader.GetString(reader.GetOrdinal("address")),
+                        City = reader.IsDBNull(reader.GetOrdinal("city"))
+                            ? null
+                            : reader.GetString(reader.GetOrdinal("city")),
+                        Hotline = reader.IsDBNull(reader.GetOrdinal("hotline"))
+                            ? null
+                            : reader.GetString(reader.GetOrdinal("hotline")),
+                        ImageUrl = reader.IsDBNull(reader.GetOrdinal("image_url"))
+                            ? null
+                            : reader.GetString(reader.GetOrdinal("image_url"))
+                    };
+
+                    cinemas.Add(cinema);
+                }
+
+                var auditoriumIdOrdinal = reader.GetOrdinal("auditorium_id");
+
+                if (!reader.IsDBNull(auditoriumIdOrdinal))
+                {
+                    var auditoriumId = reader.GetGuid(auditoriumIdOrdinal);
+
+                    if (!cinema.Auditoriums.Any(a => a.Id == auditoriumId))
+                    {
+                        cinema.Auditoriums.Add(new AuditoriumDto
+                        {
+                            Id = auditoriumId,
+                            CinemaId = cinemaId,
+                            Name = reader.GetString(
+                                reader.GetOrdinal("auditorium_name")),
+                            HallType = reader.IsDBNull(
+                                reader.GetOrdinal("hall_type"))
+                                ? "2D"
+                                : reader.GetString(
+                                    reader.GetOrdinal("hall_type")),
+                            TotalRows = reader.IsDBNull(
+                                reader.GetOrdinal("total_rows"))
+                                ? null
+                                : reader.GetInt32(
+                                    reader.GetOrdinal("total_rows")),
+                            TotalColumns = reader.IsDBNull(
+                                reader.GetOrdinal("total_columns"))
+                                ? null
+                                : reader.GetInt32(
+                                    reader.GetOrdinal("total_columns"))
+                        });
+                    }
+                }
+            }
+
+            return cinemas;
+        }
+        finally
+        {
+            if (connection.State == ConnectionState.Open)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    // GET /api/cinemas/{id}
+    public async Task<CinemaDto?> GetCinemaByIdAsync(Guid id)
+    {
+        var connection = _context.Database.GetDbConnection();
+
+        try
+        {
+            if (connection.State != ConnectionState.Open)
+            {
+                await connection.OpenAsync();
+            }
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText = @"
+                SELECT
+                    c.id AS cinema_id,
+                    c.name AS cinema_name,
+                    c.address,
+                    c.city,
+                    c.hotline,
+                    c.image_url,
+                    a.id AS auditorium_id,
+                    a.cinema_id,
+                    a.name AS auditorium_name,
+                    a.hall_type,
+                    a.total_rows,
+                    a.total_columns
+                FROM cinemas c
+                LEFT JOIN auditoriums a
+                    ON a.cinema_id = c.id
+                    AND a.deleted_at IS NULL
+                WHERE c.id = @id
+                    AND c.deleted_at IS NULL
+                ORDER BY a.name;
+            ";
+
+            var idParameter = command.CreateParameter();
+            idParameter.ParameterName = "@id";
+            idParameter.Value = id;
+
+            command.Parameters.Add(idParameter);
+
+            using var reader = await command.ExecuteReaderAsync();
+
+            CinemaDto? cinema = null;
+
+            while (await reader.ReadAsync())
+            {
+                var cinemaId = reader.GetGuid(
+                    reader.GetOrdinal("cinema_id"));
+
+                if (cinema == null)
+                {
+                    cinema = new CinemaDto
+                    {
+                        Id = cinemaId,
+                        Name = reader.GetString(
+                            reader.GetOrdinal("cinema_name")),
+                        Address = reader.IsDBNull(
+                            reader.GetOrdinal("address"))
+                            ? null
+                            : reader.GetString(
+                                reader.GetOrdinal("address")),
+                        City = reader.IsDBNull(
+                            reader.GetOrdinal("city"))
+                            ? null
+                            : reader.GetString(
+                                reader.GetOrdinal("city")),
+                        Hotline = reader.IsDBNull(
+                            reader.GetOrdinal("hotline"))
+                            ? null
+                            : reader.GetString(
+                                reader.GetOrdinal("hotline")),
+                        ImageUrl = reader.IsDBNull(
+                            reader.GetOrdinal("image_url"))
+                            ? null
+                            : reader.GetString(
+                                reader.GetOrdinal("image_url"))
+                    };
+                }
+
+                var auditoriumIdOrdinal =
+                    reader.GetOrdinal("auditorium_id");
+
+                if (!reader.IsDBNull(auditoriumIdOrdinal))
+                {
+                    cinema.Auditoriums.Add(new AuditoriumDto
+                    {
+                        Id = reader.GetGuid(auditoriumIdOrdinal),
+                        CinemaId = cinemaId,
+                        Name = reader.GetString(
+                            reader.GetOrdinal("auditorium_name")),
+                        HallType = reader.IsDBNull(
+                            reader.GetOrdinal("hall_type"))
+                            ? "2D"
+                            : reader.GetString(
+                                reader.GetOrdinal("hall_type")),
+                        TotalRows = reader.IsDBNull(
+                            reader.GetOrdinal("total_rows"))
+                            ? null
+                            : reader.GetInt32(
+                                reader.GetOrdinal("total_rows")),
+                        TotalColumns = reader.IsDBNull(
+                            reader.GetOrdinal("total_columns"))
+                            ? null
+                            : reader.GetInt32(
+                                reader.GetOrdinal("total_columns"))
+                    });
+                }
+            }
+
+            return cinema;
+        }
+        finally
+        {
+            if (connection.State == ConnectionState.Open)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    // GET /api/auditoriums/{id}/seats
+    public async Task<List<SeatDto>> GetSeatsByAuditoriumIdAsync(
+        Guid auditoriumId)
+    {
+        var connection = _context.Database.GetDbConnection();
+
+        try
+        {
+            if (connection.State != ConnectionState.Open)
+            {
+                await connection.OpenAsync();
+            }
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText = @"
+                SELECT
+                    s.id,
+                    s.auditorium_id,
+                    s.row_label,
+                    s.column_number,
+                    st.name AS seat_type
+                FROM seats s
+                INNER JOIN seattypes st
+                    ON st.id = s.seat_type_id
+                WHERE s.auditorium_id = @auditoriumId
+                    AND st.deleted_at IS NULL
+                ORDER BY s.row_label, s.column_number;
+            ";
+
+            var auditoriumIdParameter = command.CreateParameter();
+            auditoriumIdParameter.ParameterName = "@auditoriumId";
+            auditoriumIdParameter.Value = auditoriumId;
+
+            command.Parameters.Add(auditoriumIdParameter);
+
+            using var reader = await command.ExecuteReaderAsync();
+
+            var seats = new List<SeatDto>();
+
+            while (await reader.ReadAsync())
+            {
+                seats.Add(new SeatDto
+                {
+                    Id = reader.GetGuid(
+                        reader.GetOrdinal("id")),
+
+                    AuditoriumId = reader.GetGuid(
+                        reader.GetOrdinal("auditorium_id")),
+
+                    Row = reader.GetString(
+                        reader.GetOrdinal("row_label")),
+
+                    Number = reader.GetInt32(
+                        reader.GetOrdinal("column_number")),
+
+                    SeatType = reader.GetString(
+                        reader.GetOrdinal("seat_type"))
+                });
+            }
+
+            return seats;
+        }
+        finally
+        {
+            if (connection.State == ConnectionState.Open)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Services\ICinemaService.cs
+================================================================================
+using MovieBooking.Service.DTOs;
+
+namespace MovieBooking.Service.Services;
+
+public interface ICinemaService
+{
+    Task<List<CinemaDto>> GetCinemasAsync(string? city = null);
+
+    Task<CinemaDto?> GetCinemaByIdAsync(Guid id);
+
+    Task<List<SeatDto>> GetSeatsByAuditoriumIdAsync(Guid auditoriumId);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Services\IMovieService.cs
+================================================================================
+
+using MovieBooking.Service.DTOs;
+
+namespace MovieBooking.Service.Services;
+
+public interface IMovieService
+{
+    Task<MovieListResponse> GetMoviesAsync(
+        string? status,
+        string? search,
+        string? genre,
+        string sortBy,
+        string? city,
+        Guid? cinemaId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto?> GetMovieByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
+    Task<List<GenreDto>> GetGenresAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto> CreateMovieAsync(
+        CreateMovieRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto?> UpdateMovieAsync(
+        Guid id,
+        UpdateMovieRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> SoftDeleteMovieAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Services\MovieService.cs
+================================================================================
+
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data;
+using MovieBooking.Data.Entities;
+using MovieBooking.Service.DTOs;
+
+namespace MovieBooking.Service.Services;
+
+public class MovieService : IMovieService
+{
+    private readonly AppDbContext _dbContext;
+
+    public MovieService(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<MovieListResponse> GetMoviesAsync(
+        string? status,
+        string? search,
+        string? genre,
+        string sortBy,
+        string? city,
+        Guid? cinemaId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = BuildMovieQuery(status, search, genre);
+
+        var selectedCity = city?.Trim();
+
+        if (!string.IsNullOrWhiteSpace(selectedCity) ||
+            cinemaId.HasValue)
+        {
+            query = query.Where(movie =>
+                _dbContext.Showtimes.Any(showtime =>
+                    showtime.MovieId == movie.Id &&
+                    (!cinemaId.HasValue ||
+                     showtime.Auditorium.CinemaId == cinemaId.Value) &&
+                    (string.IsNullOrWhiteSpace(selectedCity) ||
+                     (showtime.Auditorium.Cinema.City != null &&
+                      EF.Functions.ILike(
+                          showtime.Auditorium.Cinema.City,
+                          selectedCity)))));
+        }
+
+        var totalItems = await query.CountAsync(cancellationToken);
+
+        IOrderedQueryable<Movie> orderedQuery = sortBy switch
+        {
+            "title" => query
+                .OrderBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id),
+
+            "rating" => query
+                .OrderByDescending(movie => movie.RatingScore ?? -1m)
+                .ThenBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id),
+
+            _ => query
+                .OrderByDescending(movie => movie.ReleaseDate)
+                .ThenBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id)
+        };
+
+        var movies = await orderedQuery
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        await PopulateRelationsAsync(movies, cancellationToken);
+
+        return new MovieListResponse
+        {
+            Items = movies.Select(MapMovie).ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalItems = totalItems,
+            TotalPages = (int)Math.Ceiling(
+                totalItems / (double)pageSize)
+        };
+    }
+
+    public async Task<MovieDto?> GetMovieByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await BuildMovieQuery(null, null, null)
+            .FirstOrDefaultAsync(
+                item => item.Id == id,
+                cancellationToken);
+
+        if (movie is null)
+            return null;
+
+        await PopulateRelationsAsync(
+            new List<Movie> { movie },
+            cancellationToken);
+
+        return MapMovie(movie);
+    }
+
+    public async Task<List<GenreDto>> GetGenresAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Genres
+            .AsNoTracking()
+            .OrderBy(genre => genre.Name)
+            .Select(genre => new GenreDto
+            {
+                Id = genre.Id,
+                Name = genre.Name
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<MovieDto> CreateMovieAsync(
+        CreateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMovieRequest(request);
+
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+
+        var actors = request.Actors
+            .GroupBy(x => x.ActorId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (await _dbContext.Genres.CountAsync(
+                x => genreIds.Contains(x.Id),
+                cancellationToken) != genreIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều thể loại không tồn tại.");
+        }
+
+        if (await _dbContext.Directors.CountAsync(
+                x => directorIds.Contains(x.Id),
+                cancellationToken) != directorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều đạo diễn không tồn tại.");
+        }
+
+        var actorIds = actors.Select(x => x.ActorId).ToList();
+
+        if (await _dbContext.Actors.CountAsync(
+                x => actorIds.Contains(x.Id),
+                cancellationToken) != actorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều diễn viên không tồn tại.");
+        }
+
+        var now = DateTime.UtcNow;
+
+        var movie = new Movie
+        {
+            Id = Guid.NewGuid(),
+            Title = request.Title.Trim(),
+            OriginalTitle = request.OriginalTitle,
+            Overview = request.Overview,
+            DurationMin = request.DurationMin,
+            AgeRating = request.AgeRating,
+            PosterUrl = request.PosterUrl,
+            BackdropUrl = request.BackdropUrl,
+            TrailerUrl = request.TrailerUrl,
+            ReleaseDate = request.ReleaseDate,
+            RatingScore = request.RatingScore,
+            Status = request.Status,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        _dbContext.Movies.Add(movie);
+
+        foreach (var genreId in genreIds)
+        {
+            _dbContext.MovieGenres.Add(new MovieGenre
+            {
+                MovieId = movie.Id,
+                GenreId = genreId
+            });
+        }
+
+        foreach (var directorId in directorIds)
+        {
+            _dbContext.MovieDirectors.Add(new MovieDirector
+            {
+                MovieId = movie.Id,
+                DirectorId = directorId
+            });
+        }
+
+        foreach (var actor in actors)
+        {
+            _dbContext.MovieActors.Add(new MovieActor
+            {
+                MovieId = movie.Id,
+                ActorId = actor.ActorId,
+                CharacterName = actor.CharacterName
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await PopulateRelationsAsync(
+            new List<Movie> { movie },
+            cancellationToken);
+
+        return MapMovie(movie);
+    }
+
+    public async Task<MovieDto?> UpdateMovieAsync(
+        Guid id,
+        UpdateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMovieRequest(request);
+
+        var movie = await _dbContext.Movies
+            .FirstOrDefaultAsync(
+                x => x.Id == id,
+                cancellationToken);
+
+        if (movie is null)
+            return null;
+
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+
+        var actors = request.Actors
+            .GroupBy(x => x.ActorId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (await _dbContext.Genres.CountAsync(
+                x => genreIds.Contains(x.Id),
+                cancellationToken) != genreIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều thể loại không tồn tại.");
+        }
+
+        if (await _dbContext.Directors.CountAsync(
+                x => directorIds.Contains(x.Id),
+                cancellationToken) != directorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều đạo diễn không tồn tại.");
+        }
+
+        var actorIds = actors.Select(x => x.ActorId).ToList();
+
+        if (await _dbContext.Actors.CountAsync(
+                x => actorIds.Contains(x.Id),
+                cancellationToken) != actorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều diễn viên không tồn tại.");
+        }
+
+        movie.Title = request.Title.Trim();
+        movie.OriginalTitle = request.OriginalTitle;
+        movie.Overview = request.Overview;
+        movie.DurationMin = request.DurationMin;
+        movie.AgeRating = request.AgeRating;
+        movie.PosterUrl = request.PosterUrl;
+        movie.BackdropUrl = request.BackdropUrl;
+        movie.TrailerUrl = request.TrailerUrl;
+        movie.ReleaseDate = request.ReleaseDate;
+        movie.RatingScore = request.RatingScore;
+        movie.Status = request.Status;
+        movie.UpdatedAt = DateTime.UtcNow;
+
+        var oldGenres = await _dbContext.MovieGenres
+            .Where(x => x.MovieId == id)
+            .ToListAsync(cancellationToken);
+
+        var oldDirectors = await _dbContext.MovieDirectors
+            .Where(x => x.MovieId == id)
+            .ToListAsync(cancellationToken);
+
+        var oldActors = await _dbContext.MovieActors
+            .Where(x => x.MovieId == id)
+            .ToListAsync(cancellationToken);
+
+        _dbContext.MovieGenres.RemoveRange(oldGenres);
+        _dbContext.MovieDirectors.RemoveRange(oldDirectors);
+        _dbContext.MovieActors.RemoveRange(oldActors);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var genreId in genreIds)
+        {
+            _dbContext.MovieGenres.Add(new MovieGenre
+            {
+                MovieId = id,
+                GenreId = genreId
+            });
+        }
+
+        foreach (var directorId in directorIds)
+        {
+            _dbContext.MovieDirectors.Add(new MovieDirector
+            {
+                MovieId = id,
+                DirectorId = directorId
+            });
+        }
+
+        foreach (var actor in actors)
+        {
+            _dbContext.MovieActors.Add(new MovieActor
+            {
+                MovieId = id,
+                ActorId = actor.ActorId,
+                CharacterName = actor.CharacterName
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        movie.MovieGenres = new List<MovieGenre>();
+        movie.MovieDirectors = new List<MovieDirector>();
+        movie.MovieActors = new List<MovieActor>();
+
+        await PopulateRelationsAsync(
+            new List<Movie> { movie },
+            cancellationToken);
+
+        return MapMovie(movie);
+    }
+
+    public async Task<bool> SoftDeleteMovieAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await _dbContext.Movies
+            .FirstOrDefaultAsync(
+                x => x.Id == id,
+                cancellationToken);
+
+        if (movie is null)
+            return false;
+
+        movie.DeletedAt = DateTime.UtcNow;
+        movie.UpdatedAt = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    private static void ValidateMovieRequest(
+        CreateMovieRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            throw new ArgumentException(
+                "Tên phim không được để trống.");
+
+        if (request.DurationMin <= 0)
+            throw new ArgumentException(
+                "Thời lượng phim phải lớn hơn 0.");
+
+        if (request.RatingScore is < 0 or > 10)
+            throw new ArgumentException(
+                "Điểm đánh giá phải từ 0 đến 10.");
+
+        if (request.GenreIds.Count == 0)
+            throw new ArgumentException(
+                "Phải chọn ít nhất một thể loại.");
+
+        if (request.Actors.Any(x => x.ActorId == Guid.Empty))
+            throw new ArgumentException(
+                "ID diễn viên không hợp lệ.");
+    }
+
+    private IQueryable<Movie> BuildMovieQuery(
+        string? status,
+        string? search,
+        string? genre)
+    {
+        var query = _dbContext.Movies
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(
+                movie => movie.Status == status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{search.Trim()}%";
+
+            query = query.Where(movie =>
+                EF.Functions.ILike(movie.Title, pattern) ||
+                (movie.OriginalTitle != null &&
+                 EF.Functions.ILike(
+                     movie.OriginalTitle, pattern)) ||
+                movie.MovieGenres.Any(movieGenre =>
+                    EF.Functions.ILike(
+                        movieGenre.Genre.Name, pattern)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(genre))
+        {
+            var selectedGenre = genre.Trim();
+
+            query = query.Where(movie =>
+                movie.MovieGenres.Any(movieGenre =>
+                    EF.Functions.ILike(
+                        movieGenre.Genre.Name,
+                        selectedGenre)));
+        }
+
+        return query;
+    }
+
+    private async Task PopulateRelationsAsync(
+        List<Movie> movies,
+        CancellationToken cancellationToken)
+    {
+        if (movies.Count == 0)
+            return;
+
+        var movieIds = movies
+            .Select(movie => movie.Id)
+            .ToHashSet();
+
+        var movieGenres = await _dbContext.MovieGenres
+            .FromSqlRaw(
+                "SELECT movie_id, genre_id FROM moviegenres")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var movieDirectors = await _dbContext.MovieDirectors
+            .FromSqlRaw(
+                "SELECT movie_id, director_id FROM moviedirectors")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var movieActors = await _dbContext.MovieActors
+            .FromSqlRaw(
+                "SELECT movie_id, actor_id, character_name FROM movieactors")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var genreIds = movieGenres
+            .Select(x => x.GenreId)
+            .ToHashSet();
+
+        var directorIds = movieDirectors
+            .Select(x => x.DirectorId)
+            .ToHashSet();
+
+        var actorIds = movieActors
+            .Select(x => x.ActorId)
+            .ToHashSet();
+
+        var genres = await _dbContext.Genres
+            .AsNoTracking()
+            .Where(x => genreIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var directors = await _dbContext.Directors
+            .AsNoTracking()
+            .Where(x => directorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var actors = await _dbContext.Actors
+            .AsNoTracking()
+            .Where(x => actorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        foreach (var movie in movies)
+        {
+            movie.MovieGenres = movieGenres
+                .Where(x =>
+                    x.MovieId == movie.Id &&
+                    genres.ContainsKey(x.GenreId))
+                .Select(x => new MovieGenre
+                {
+                    MovieId = x.MovieId,
+                    GenreId = x.GenreId,
+                    Genre = genres[x.GenreId]
+                })
+                .ToList();
+
+            movie.MovieDirectors = movieDirectors
+                .Where(x =>
+                    x.MovieId == movie.Id &&
+                    directors.ContainsKey(x.DirectorId))
+                .Select(x => new MovieDirector
+                {
+                    MovieId = x.MovieId,
+                    DirectorId = x.DirectorId,
+                    Director = directors[x.DirectorId]
+                })
+                .ToList();
+
+            movie.MovieActors = movieActors
+                .Where(x =>
+                    x.MovieId == movie.Id &&
+                    actors.ContainsKey(x.ActorId))
+                .Select(x => new MovieActor
+                {
+                    MovieId = x.MovieId,
+                    ActorId = x.ActorId,
+                    CharacterName = x.CharacterName,
+                    Actor = actors[x.ActorId]
+                })
+                .ToList();
+        }
+    }
+
+    private static MovieDto MapMovie(Movie movie)
+    {
+        return new MovieDto
+        {
+            Id = movie.Id,
+            Title = movie.Title,
+            OriginalTitle = movie.OriginalTitle,
+            Overview = movie.Overview,
+            DurationMin = movie.DurationMin,
+            AgeRating = movie.AgeRating,
+            PosterUrl = movie.PosterUrl,
+            BackdropUrl = movie.BackdropUrl,
+            TrailerUrl = movie.TrailerUrl,
+            ReleaseDate = movie.ReleaseDate,
+            RatingScore = movie.RatingScore,
+            Status = movie.Status,
+
+            Genres = movie.MovieGenres
+                .OrderBy(x => x.Genre.Name)
+                .Select(x => x.Genre.Name)
+                .ToList(),
+
+            Directors = movie.MovieDirectors
+                .OrderBy(x => x.Director.Name)
+                .Select(x => x.Director.Name)
+                .ToList(),
+
+            Actors = movie.MovieActors
+                .OrderBy(x => x.Actor.Name)
+                .Select(x => new MovieActorDto
+                {
+                    ActorId = x.ActorId,
+                    Name = x.Actor.Name,
+                    ProfilePath = x.Actor.ProfilePath,
+                    CharacterName = x.CharacterName
+                })
+                .ToList()
+        };
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\api\useMovies.js
+================================================================================
+import axiosInstance from './axiosInstance';
+
+const useMovies = {
+    async getAllMovies({
+        status,
+        search,
+        genre,
+        city,
+        cinemaId,
+        sortBy = 'latest',
+        page = 1,
+        pageSize = 12
+    } = {}) {
+        const params = {
+            page,
+            pageSize,
+            sortBy
+        };
+
+        const optionalParams = {
+            status,
+            search,
+            genre: genre && genre !== 'all' ? genre : undefined,
+            city,
+            cinemaId
+        };
+
+        for (const [key, value] of Object.entries(optionalParams)) {
+            if (
+                value !== undefined &&
+                value !== null &&
+                String(value).trim() !== ''
+            ) {
+                params[key] = String(value).trim();
+            }
+        }
+
+        return axiosInstance.get('/movies', { params });
+    },
+
+    async getMovieById(id) {
+        if (!id) {
+            throw new Error('ID phim không được để trống');
+        }
+
+        return axiosInstance.get(`/movies/${encodeURIComponent(id)}`);
+    },
+
+    async getCinemas() {
+        return axiosInstance.get('/cinemas');
+    },
+
+    async getGenres() {
+        return axiosInstance.get('/genres');
+    },
+
+    async createMovie(data) {
+        return axiosInstance.post('/movies', data);
+    },
+
+    async updateMovie(id, data) {
+        if (!id) {
+            throw new Error('ID phim không được để trống');
+        }
+
+        return axiosInstance.put(
+            `/movies/${encodeURIComponent(id)}`,
+            data
+        );
+    },
+
+    async deleteMovie(id) {
+        if (!id) {
+            throw new Error('ID phim không được để trống');
+        }
+
+        return axiosInstance.delete(
+            `/movies/${encodeURIComponent(id)}`
+        );
+    },
+
+    async getTopMoviesReport() {
+        return axiosInstance.get('/movies/reports/top');
+    }
+};
+
+export { useMovies };
+export default useMovies;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\pages\Movies.jsx
+================================================================================
+
+import React, { useState, useEffect } from 'react';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
+import { useSearchParams } from 'react-router-dom';
+import MovieCard from '../components/MovieCard';
+import {
+    Search,
+    Grid3X3,
+    List,
+    Calendar,
+    Star,
+    Clock,
+    MapPin,
+    Loader2,
+    SlidersHorizontal,
+    X,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight
+} from 'lucide-react';
+import BlurCircle from '../components/BlurCircle';
+import { useMovies } from '../api';
+
+const mapMovie = (movie) => ({
+    ...movie,
+    _id: movie.id,
+    poster_path: movie.posterUrl || movie.backdropUrl,
+    backdrop_path: movie.backdropUrl || movie.posterUrl,
+    release_date: movie.releaseDate,
+    runtime: movie.durationMin,
+    vote_average: movie.ratingScore,
+    genre: movie.genres?.join(', ') || '',
+    genres: movie.genres?.map((name) => ({ name })) || []
+});
+
+const normalizeCity = (city) =>
+    (city || '').trim().toLocaleLowerCase('vi');
+
+const Movies = () => {
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    const searchParam = searchParams.get('search') || '';
+    const cityParam = searchParams.get('city') || '';
+    const cinemaIdParam = searchParams.get('cinemaId') || '';
+
+    const [movies, setMovies] = useState([]);
+    const [genres, setGenres] = useState([]);
+    const [cinemas, setCinemas] = useState([]);
+    const [cinemasLoaded, setCinemasLoaded] = useState(false);
+
+    const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState(searchParam);
+    const [selectedGenre, setSelectedGenre] = useState('all');
+    const [selectedCity, setSelectedCity] = useState(cityParam);
+    const [selectedCinemaId, setSelectedCinemaId] = useState(cinemaIdParam);
+
+    const [sortBy, setSortBy] = useState('latest');
+    const [viewMode, setViewMode] = useState('grid');
+    const [showFilters, setShowFilters] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalItems, setTotalItems] = useState(0);
+    const [refreshKey, setRefreshKey] = useState(0);
+
+    const pageSize = 12;
+    const filteredMovies = movies;
+
+    // Đồng bộ các bộ lọc từ URL khi mở trang hoặc URL thay đổi.
+    useEffect(() => {
+        setSearchQuery(searchParam);
+        setSelectedCity(cityParam);
+        setSelectedCinemaId(cinemaIdParam);
+        setCurrentPage(1);
+    }, [searchParam, cityParam, cinemaIdParam]);
+
+    // Tải danh sách rạp để tạo bộ lọc tỉnh/thành và cụm rạp.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCinemas = async () => {
+            try {
+                const response = await useMovies.getCinemas();
+
+                if (cancelled) return;
+
+                const list = Array.isArray(response)
+                    ? response
+                    : Array.isArray(response?.items)
+                        ? response.items
+                        : Array.isArray(response?.data)
+                            ? response.data
+                            : Array.isArray(response?.data?.items)
+                                ? response.data.items
+                                : [];
+
+                setCinemas(list);
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Lỗi khi tải danh sách rạp:', error);
+                    setCinemas([]);
+                }
+            } finally {
+                if (!cancelled) {
+                    setCinemasLoaded(true);
+                }
+            }
+        };
+
+        void loadCinemas();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Nếu URL chỉ có cinemaId, tự xác định thành phố của rạp đó.
+    // Chỉ xử lý sau khi đã tải xong danh sách rạp.
+    useEffect(() => {
+        if (!cinemasLoaded || !selectedCinemaId) return;
+
+        const cinema = cinemas.find(
+            (item) =>
+                String(item.id).toLowerCase() ===
+                String(selectedCinemaId).toLowerCase()
+        );
+
+        if (!cinema?.city) return;
+
+        const cinemaCity = cinema.city.trim();
+
+        if (
+            !selectedCity ||
+            normalizeCity(selectedCity) !== normalizeCity(cinemaCity)
+        ) {
+            setSelectedCity(cinemaCity);
+
+            setSearchParams(
+                (previous) => {
+                    const next = new URLSearchParams(previous);
+                    next.set('city', cinemaCity);
+                    next.set('cinemaId', String(cinema.id));
+                    return next;
+                },
+                { replace: true }
+            );
+        }
+    }, [
+        cinemasLoaded,
+        cinemas,
+        selectedCinemaId,
+        selectedCity,
+        setSearchParams
+    ]);
+
+    const cities = [
+        ...new Set(
+            cinemas
+                .map((cinema) => cinema.city?.trim())
+                .filter(Boolean)
+        )
+    ].sort((a, b) => a.localeCompare(b, 'vi'));
+
+    const filteredCinemas = cinemas.filter(
+        (cinema) =>
+            !selectedCity ||
+            normalizeCity(cinema.city) === normalizeCity(selectedCity)
+    );
+
+    // Tải danh sách phim theo các bộ lọc và phân trang.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadMovies = async () => {
+            setLoading(true);
+
+            try {
+                const response = await useMovies.getAllMovies({
+                    status: 'now_showing',
+                    search: searchQuery.trim() || undefined,
+                    genre: selectedGenre === 'all'
+                        ? undefined
+                        : selectedGenre,
+                    city: selectedCity || undefined,
+                    cinemaId: selectedCinemaId || undefined,
+                    sortBy,
+                    page: currentPage,
+                    pageSize
+                });
+
+                if (cancelled) return;
+
+                const items = Array.isArray(response)
+                    ? response
+                    : response?.items || [];
+
+                setMovies(items.map(mapMovie));
+                setTotalItems(response?.totalItems ?? items.length);
+                setTotalPages(
+                    Math.max(1, response?.totalPages ?? 1)
+                );
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Lỗi khi tải danh sách phim:', error);
+                    setMovies([]);
+                    setTotalItems(0);
+                    setTotalPages(1);
+                }
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        void loadMovies();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        searchQuery,
+        selectedGenre,
+        selectedCity,
+        selectedCinemaId,
+        sortBy,
+        currentPage,
+        refreshKey
+    ]);
+
+    // Tải danh sách thể loại từ API.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadGenres = async () => {
+            try {
+                const response = await useMovies.getGenres();
+
+                if (cancelled) return;
+
+                const genreList = Array.isArray(response)
+                    ? response
+                    : response?.items || [];
+
+                setGenres(
+                    genreList
+                        .map((genre) =>
+                            typeof genre === 'string'
+                                ? genre
+                                : genre?.name
+                        )
+                        .filter(Boolean)
+                );
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Lỗi khi tải thể loại:', error);
+                }
+            }
+        };
+
+        void loadGenres();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Làm mới danh sách khi dữ liệu phim thay đổi qua SignalR.
+    useEffect(() => {
+        let cancelled = false;
+        let connection = null;
+
+        const connectSignalR = async () => {
+            const apiBaseUrl = (
+                import.meta.env.VITE_API_BASE_URL ||
+                'http://localhost:5000/api'
+            ).replace(/\/+$/, '');
+
+            const hubUrl =
+                apiBaseUrl.replace(/\/api$/i, '') + '/hubs/movies';
+
+            const newConnection = new HubConnectionBuilder()
+                .withUrl(hubUrl)
+                .withAutomaticReconnect()
+                .configureLogging(LogLevel.Warning)
+                .build();
+
+            connection = newConnection;
+
+            const refreshMovies = () => {
+                if (!cancelled) {
+                    setRefreshKey((value) => value + 1);
+                }
+            };
+
+            newConnection.on('MovieCreated', refreshMovies);
+            newConnection.on('MovieUpdated', refreshMovies);
+            newConnection.on('MovieDeleted', refreshMovies);
+            newConnection.onreconnected(refreshMovies);
+
+            try {
+                await newConnection.start();
+
+                if (cancelled) {
+                    await newConnection.stop();
+                    return;
+                }
+
+                console.info('SignalR đã kết nối:', hubUrl);
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Không thể kết nối SignalR:', error);
+                }
+            }
+        };
+
+        void connectSignalR();
+
+        return () => {
+            cancelled = true;
+
+            if (connection) {
+                void connection.stop().catch((error) => {
+                    console.error('Lỗi khi đóng kết nối SignalR:', error);
+                });
+            }
+        };
+    }, []);
+
+    const sortOptions = [
+        { value: 'latest', label: 'Mới nhất' },
+        { value: 'title', label: 'Tên phim A-Z' },
+        { value: 'rating', label: 'Đánh giá cao' }
+    ];
+
+    // Chọn thành phố sẽ xóa rạp đã chọn trước đó.
+    const handleCityChange = (city) => {
+        setSelectedCity(city);
+        setSelectedCinemaId('');
+        setCurrentPage(1);
+
+        setSearchParams((previous) => {
+            const next = new URLSearchParams(previous);
+
+            if (city) {
+                next.set('city', city);
+            } else {
+                next.delete('city');
+            }
+
+            next.delete('cinemaId');
+            next.delete('page');
+
+            return next;
+        });
+    };
+
+    // Chọn rạp sẽ đồng bộ cả city và cinemaId lên URL.
+    const handleCinemaChange = (cinemaId) => {
+        const cinema = cinemas.find(
+            (item) => String(item.id) === cinemaId
+        );
+
+        const city = cinema?.city?.trim() || selectedCity;
+
+        setSelectedCity(city);
+        setSelectedCinemaId(cinemaId);
+        setCurrentPage(1);
+
+        setSearchParams((previous) => {
+            const next = new URLSearchParams(previous);
+
+            if (city) {
+                next.set('city', city);
+            } else {
+                next.delete('city');
+            }
+
+            if (cinemaId) {
+                next.set('cinemaId', cinemaId);
+            } else {
+                next.delete('cinemaId');
+            }
+
+            next.delete('page');
+
+            return next;
+        });
+    };
+
+    const handleClearFilters = () => {
+        setSearchQuery('');
+        setSelectedGenre('all');
+        setSortBy('latest');
+        setSelectedCity('');
+        setSelectedCinemaId('');
+        setCurrentPage(1);
+
+        setSearchParams((previous) => {
+            const next = new URLSearchParams(previous);
+            next.delete('search');
+            next.delete('city');
+            next.delete('cinemaId');
+            next.delete('page');
+            return next;
+        });
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
+                <div className="max-w-7xl mx-auto">
+                    <div className="flex items-center justify-center min-h-[60vh]">
+                        <div className="text-center">
+                            <Loader2 className="w-12 h-12 text-red-500 animate-spin mx-auto mb-4" />
+
+                            <h2 className="text-white text-xl font-semibold mb-2">
+                                Đang tải danh sách phim...
+                            </h2>
+
+                            <p className="text-gray-400">
+                                Vui lòng chờ trong giây lát
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 pb-12">
+            <BlurCircle top="150px" left="0px" />
+            <BlurCircle bottom="50px" right="50px" />
+
+            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                {/* Header */}
+                <div className="text-center mb-12">
+                    <div className="inline-flex items-center gap-3 mb-4">
+                        <div className="w-12 h-12 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
+                            <Calendar className="w-6 h-6 text-white" />
+                        </div>
+
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-red-500 via-pink-500 to-purple-500 bg-clip-text text-transparent">
+                            Phim Đang Chiếu
+                        </h1>
+                    </div>
+
+                    <p className="text-gray-400 text-lg md:text-xl max-w-3xl mx-auto leading-relaxed">
+                        Khám phá những bộ phim mới nhất và hấp dẫn nhất đang được chiếu tại rạp
+                    </p>
+
+                    <div className="flex items-center justify-center gap-8 mt-8 text-sm">
+                        <div className="flex items-center gap-2 text-gray-300">
+                            <Star className="w-4 h-4 text-yellow-500" />
+                            <span>{totalItems} bộ phim</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-gray-300">
+                            <Clock className="w-4 h-4 text-blue-500" />
+                            <span>Cập nhật hàng ngày</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-gray-300">
+                            <MapPin className="w-4 h-4 text-green-500" />
+                            <span>
+                                {selectedCity || 'Toàn quốc'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Tìm kiếm và bộ lọc */}
+                <div className="bg-black/20 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-8">
+                    <div className="flex flex-col lg:flex-row gap-4 mb-4">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+
+                            <input
+                                type="text"
+                                placeholder="Tìm kiếm phim theo tên hoặc thể loại..."
+                                value={searchQuery}
+                                onChange={(event) => {
+                                    setSearchQuery(event.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="w-full pl-12 pr-12 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-red-500 focus:bg-white/10 transition-all duration-300"
+                            />
+
+                            {searchQuery && (
+                                <button
+                                    type="button"
+                                    aria-label="Xóa từ khóa tìm kiếm"
+                                    onClick={() => {
+                                        setSearchQuery('');
+                                        setCurrentPage(1);
+                                    }}
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            )}
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => setShowFilters(!showFilters)}
+                            className="lg:hidden flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors duration-300"
+                        >
+                            <SlidersHorizontal className="w-5 h-5" />
+                            Bộ lọc
+
+                            <ChevronDown
+                                className={showFilters ? "w-4 h-4 transition-transform duration-300 rotate-180" : "w-4 h-4 transition-transform duration-300"}
+                            />
+                        </button>
+                    </div>
+
+                    <div
+                        className={showFilters ? "lg:flex items-center gap-4 flex flex-col lg:flex-row" : "lg:flex items-center gap-4 hidden lg:flex"}
+                    >
+                        {/* Tỉnh/thành phố */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Khu vực (Tỉnh/Thành phố)
+                            </label>
+
+                            <select
+                                value={selectedCity}
+                                onChange={(event) =>
+                                    handleCityChange(event.target.value)
+                                }
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500"
+                            >
+                                <option value="" className="bg-gray-800">
+                                    Tất cả tỉnh/thành
+                                </option>
+
+                                {cities.map((city) => (
+                                    <option
+                                        key={city}
+                                        value={city}
+                                        className="bg-gray-800"
+                                    >
+                                        {city}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Cụm rạp */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Cụm rạp
+                            </label>
+
+                            <select
+                                value={selectedCinemaId}
+                                onChange={(event) =>
+                                    handleCinemaChange(event.target.value)
+                                }
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500"
+                            >
+                                <option value="" className="bg-gray-800">
+                                    Tất cả rạp trong khu vực
+                                </option>
+
+                                {filteredCinemas.map((cinema) => (
+                                    <option
+                                        key={cinema.id}
+                                        value={String(cinema.id)}
+                                        className="bg-gray-800"
+                                    >
+                                        {cinema.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Thể loại */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Thể loại
+                            </label>
+
+                            <select
+                                value={selectedGenre}
+                                onChange={(event) => {
+                                    setSelectedGenre(event.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500 transition-colors duration-300"
+                            >
+                                <option value="all" className="bg-gray-800">
+                                    Tất cả thể loại
+                                </option>
+
+                                {genres.map((genre) => (
+                                    <option
+                                        key={genre}
+                                        value={genre}
+                                        className="bg-gray-800 capitalize"
+                                    >
+                                        {genre}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Sắp xếp */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Sắp xếp theo
+                            </label>
+
+                            <select
+                                value={sortBy}
+                                onChange={(event) => {
+                                    setSortBy(event.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500 transition-colors duration-300"
+                            >
+                                {sortOptions.map((option) => (
+                                    <option
+                                        key={option.value}
+                                        value={option.value}
+                                        className="bg-gray-800"
+                                    >
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Chế độ hiển thị */}
+                        <div className="flex-shrink-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Hiển thị
+                            </label>
+
+                            <div className="flex bg-white/5 rounded-lg p-1">
+                                <button
+                                    type="button"
+                                    aria-label="Hiển thị dạng lưới"
+                                    onClick={() => setViewMode('grid')}
+                                    className={viewMode === 'grid' ? "p-2 rounded transition-colors duration-300 bg-red-500 text-white" : "p-2 rounded transition-colors duration-300 text-gray-400 hover:text-white"}
+                                >
+                                    <Grid3X3 className="w-5 h-5" />
+                                </button>
+
+                                <button
+                                    type="button"
+                                    aria-label="Hiển thị dạng danh sách"
+                                    onClick={() => setViewMode('list')}
+                                    className={viewMode === 'list' ? "p-2 rounded transition-colors duration-300 bg-red-500 text-white" : "p-2 rounded transition-colors duration-300 text-gray-400 hover:text-white"}
+                                >
+                                    <List className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {(searchQuery ||
+                            selectedGenre !== 'all' ||
+                            sortBy !== 'latest' ||
+                            selectedCity ||
+                            selectedCinemaId) && (
+                            <button
+                                type="button"
+                                onClick={handleClearFilters}
+                                className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-white transition-colors duration-300"
+                            >
+                                <X className="w-4 h-4" />
+                                Xóa bộ lọc
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Kết quả */}
+                <div className="flex items-center justify-between mb-8">
+                    <div className="text-white">
+                        <h2 className="text-2xl font-bold mb-1">
+                            {searchQuery
+                                ? ('Kết quả tìm kiếm: "' + searchQuery + '"')
+                                : 'Tất cả phim'}
+                        </h2>
+
+                        <p className="text-gray-400">
+    Tìm thấy {totalItems} bộ phim
+    {selectedCity ? " tại " + selectedCity : ""}
+    {selectedCinemaId
+        ? " tại " + (cinemas.find((cinema) => String(cinema.id) === String(selectedCinemaId))?.name || "rạp đã chọn")
+        : ""}
+    {selectedGenre !== "all" ? " trong thể loại " + selectedGenre : ""}
+</p>
+                    </div>
+                </div>
+
+                {/* Danh sách phim */}
+                {filteredMovies.length > 0 ? (
+                    <div
+                        className={(viewMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
+                            : 'flex flex-col gap-4') + ' mb-12'}
+                    >
+                        {filteredMovies.map((movie) => (
+                            <div
+                                key={movie._id}
+                                className={
+                                    viewMode === 'list'
+                                        ? 'transform transition-all duration-300 hover:scale-[1.02]'
+                                        : ''
+                                }
+                            >
+                                <MovieCard
+                                    movie={movie}
+                                    viewMode={viewMode}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="text-center py-20">
+                        <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <Search className="w-12 h-12 text-gray-600" />
+                        </div>
+
+                        <h3 className="text-white text-2xl font-bold mb-4">
+                            Không tìm thấy phim nào
+                        </h3>
+
+                        <p className="text-gray-400 mb-8 max-w-md mx-auto">
+                            Không có phim nào phù hợp với tiêu chí tìm kiếm của bạn.
+                            Hãy thử điều chỉnh bộ lọc hoặc từ khóa tìm kiếm.
+                        </p>
+
+                        <button
+                            type="button"
+                            onClick={handleClearFilters}
+                            className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors duration-300"
+                        >
+                            Xóa tất cả bộ lọc
+                        </button>
+                    </div>
+                )}
+
+                {/* Phân trang */}
+                {totalPages > 1 && (
+                    <nav
+                        aria-label="Phân trang danh sách phim"
+                        className="flex flex-wrap items-center justify-center gap-2 mb-12"
+                    >
+                        <button
+                            type="button"
+                            aria-label="Trang trước"
+                            disabled={currentPage <= 1}
+                            onClick={() =>
+                                setCurrentPage((page) =>
+                                    Math.max(1, page - 1)
+                                )
+                            }
+                            className="p-3 rounded-lg border border-white/10 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10"
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+
+                        {Array.from(
+                            { length: totalPages },
+                            (_, index) => index + 1
+                        ).map((page) => (
+                            <button
+                                key={page}
+                                type="button"
+                                aria-current={
+                                    page === currentPage ? 'page' : undefined
+                                }
+                                onClick={() => setCurrentPage(page)}
+                                className={"min-w-11 px-4 py-2 rounded-lg border transition-colors " + (page === currentPage ? "bg-red-500 border-red-500 text-white" : "border-white/10 text-gray-300 hover:bg-white/10")}>
+                                {page}
+                            </button>
+                        ))}
+
+                        <button
+                            type="button"
+                            aria-label="Trang sau"
+                            disabled={currentPage >= totalPages}
+                            onClick={() =>
+                                setCurrentPage((page) =>
+                                    Math.min(totalPages, page + 1)
+                                )
+                            }
+                            className="p-3 rounded-lg border border-white/10 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10"
+                        >
+                            <ChevronRight className="w-5 h-5" />
+                        </button>
+                    </nav>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default Movies;
+
+
+
+
+

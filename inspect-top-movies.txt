@@ -1,0 +1,4949 @@
+﻿
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Controllers\MoviesController.cs
+================================================================================
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.API.Hubs;
+using MovieBooking.Service.DTOs;
+using MovieBooking.Service.Services;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api/movies")]
+public class MoviesController : ControllerBase
+{
+    private static readonly string[] SupportedStatuses =
+        ["now_showing", "coming_soon"];
+
+    private readonly IMovieService _movieService;
+    private readonly IHubContext<MovieHub> _movieHub;
+    private readonly ILogger<MoviesController> _logger;
+
+    public MoviesController(
+        IMovieService movieService,
+        IHubContext<MovieHub> movieHub,
+        ILogger<MoviesController> logger)
+    {
+        _movieService = movieService;
+        _movieHub = movieHub;
+        _logger = logger;
+    }
+
+    // GET: api/movies
+    [HttpGet]
+    public async Task<IActionResult> GetMovies(
+    [FromQuery] string? status,
+    [FromQuery] string? search,
+    [FromQuery] string? genre,
+    [FromQuery] string sortBy = "latest",
+    [FromQuery] string? city = null,
+    [FromQuery] Guid? cinemaId = null,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 12,
+    CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(status) &&
+            !SupportedStatuses.Contains(
+                status, StringComparer.OrdinalIgnoreCase))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        if (page < 1)
+        {
+            return BadRequest(new
+            {
+                message = "page phải lớn hơn hoặc bằng 1"
+            });
+        }
+
+        if (pageSize is < 1 or > 100)
+        {
+            return BadRequest(new
+            {
+                message = "pageSize phải nằm trong khoảng từ 1 đến 100"
+            });
+        }
+
+        var normalizedSortBy = sortBy.Trim().ToLowerInvariant();
+
+        if (!new[] { "latest", "title", "rating" }.Contains(normalizedSortBy))
+        {
+            return BadRequest(new
+            {
+                message = "sortBy chỉ nhận latest, title hoặc rating"
+            });
+        }
+
+        var result = await _movieService.GetMoviesAsync(
+    status?.ToLowerInvariant(),
+    search,
+    genre,
+    normalizedSortBy,
+    string.IsNullOrWhiteSpace(city) ? null : city.Trim(),
+    cinemaId,
+    page,
+    pageSize,
+    cancellationToken);
+
+        return Ok(result);
+    }
+
+    // GET: api/movies/{id}
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetMovie(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await _movieService.GetMovieByIdAsync(
+            id, cancellationToken);
+
+        return movie is null
+            ? NotFound(new { message = "Không tìm thấy phim" })
+            : Ok(movie);
+    }
+
+    // POST: api/movies
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CreateMovie(
+        [FromBody] CreateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidStatus(request.Status))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        try
+        {
+            var movie = await _movieService.CreateMovieAsync(
+                request, cancellationToken);
+
+            await NotifyMovieChangedAsync(
+                "MovieCreated", movie.Id, movie.Status);
+
+            return CreatedAtAction(
+                nameof(GetMovie),
+                new { id = movie.Id },
+                movie);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // PUT: api/movies/{id}
+    [HttpPut("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateMovie(
+        Guid id,
+        [FromBody] UpdateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidStatus(request.Status))
+        {
+            return BadRequest(new
+            {
+                message = "status chỉ nhận now_showing hoặc coming_soon"
+            });
+        }
+
+        try
+        {
+            var movie = await _movieService.UpdateMovieAsync(
+                id, request, cancellationToken);
+
+            if (movie is null)
+            {
+                return NotFound(new
+                {
+                    message = "Không tìm thấy phim"
+                });
+            }
+
+            await NotifyMovieChangedAsync(
+                "MovieUpdated", movie.Id, movie.Status);
+
+            return Ok(movie);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // DELETE: api/movies/{id}
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> DeleteMovie(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var deleted = await _movieService.SoftDeleteMovieAsync(
+            id, cancellationToken);
+
+        if (!deleted)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy phim"
+            });
+        }
+
+        await NotifyMovieChangedAsync("MovieDeleted", id, null);
+
+        return Ok(new
+        {
+            message = "Đã xóa mềm phim thành công"
+        });
+    }
+
+    private async Task NotifyMovieChangedAsync(
+        string eventName,
+        Guid movieId,
+        string? status)
+    {
+        try
+        {
+            await _movieHub.Clients.All.SendAsync(
+                eventName,
+                new
+                {
+                    id = movieId,
+                    status
+                });
+        }
+        catch (Exception ex)
+        {
+            // Phim đã được lưu; lỗi SignalR không làm API báo thất bại.
+            _logger.LogError(
+                ex,
+                "Không thể gửi sự kiện {EventName} cho phim {MovieId}",
+                eventName,
+                movieId);
+        }
+    }
+
+    private static bool IsValidStatus(string? status) =>
+        !string.IsNullOrWhiteSpace(status) &&
+        SupportedStatuses.Contains(
+            status, StringComparer.OrdinalIgnoreCase);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Controllers\ShowtimesController.cs
+================================================================================
+using Microsoft.AspNetCore.Mvc;
+using MovieBooking.Service.DTOs;
+using MovieBooking.Service.Interfaces;
+
+namespace MovieBooking.API.Controllers;
+
+[ApiController]
+[Route("api/showtimes")]
+public class ShowtimesController : ControllerBase
+{
+    private readonly IScheduleService _scheduleService;
+
+    public ShowtimesController(IScheduleService scheduleService)
+    {
+        _scheduleService = scheduleService;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<PagedResult<ShowtimeDto>>> GetShowtimes(
+        [FromQuery] Guid? movieId,
+        [FromQuery] Guid? cinemaId,
+        [FromQuery] DateOnly? date,
+        [FromQuery] DateOnly? dateFrom,
+        [FromQuery] DateOnly? dateTo,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        var result = await _scheduleService.GetShowtimesAsync(movieId, cinemaId, date, dateFrom, dateTo, page, pageSize);
+        return Ok(result);
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<ShowtimeDto>> GetShowtimeById(Guid id)
+    {
+        var showtime = await _scheduleService.GetShowtimeByIdAsync(id);
+        if (showtime == null)
+        {
+            return NotFound(new { message = $"Không tìm thấy suất chiếu với ID: {id}" });
+        }
+
+        return Ok(showtime);
+    }
+
+    [HttpGet("{id:guid}/seats")]
+    public async Task<ActionResult<IEnumerable<ShowtimeSeatDto>>> GetShowtimeSeats(Guid id)
+    {
+        if (!await _scheduleService.ShowtimeExistsAsync(id))
+        {
+            return NotFound(new { message = $"Không tìm thấy suất chiếu với ID: {id}" });
+        }
+
+        var seats = await _scheduleService.GetSeatsForShowtimeAsync(id);
+        return Ok(seats);
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\Hubs\MovieHub.cs
+================================================================================
+using Microsoft.AspNetCore.SignalR;
+
+namespace MovieBooking.API.Hubs;
+
+public class MovieHub : Hub
+{
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\obj\Debug\net8.0\MovieBooking.API.AssemblyInfo.cs
+================================================================================
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.API")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e96709bd61a682f42105d7ab5e8a0dbe942d73a2")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.API")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.API")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\obj\Debug\net8.0\MovieBooking.API.GlobalUsings.g.cs
+================================================================================
+// <auto-generated/>
+global using global::Microsoft.AspNetCore.Builder;
+global using global::Microsoft.AspNetCore.Hosting;
+global using global::Microsoft.AspNetCore.Http;
+global using global::Microsoft.AspNetCore.Routing;
+global using global::Microsoft.Extensions.Configuration;
+global using global::Microsoft.Extensions.DependencyInjection;
+global using global::Microsoft.Extensions.Hosting;
+global using global::Microsoft.Extensions.Logging;
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Net.Http.Json;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\obj\Debug\net8.0\MovieBooking.API.MvcApplicationPartsAssemblyInfo.cs
+================================================================================
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: Microsoft.AspNetCore.Mvc.ApplicationParts.ApplicationPartAttribute("Swashbuckle.AspNetCore.SwaggerGen")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\obj\Release\net8.0\MovieBooking.API.AssemblyInfo.cs
+================================================================================
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//     Runtime Version:4.0.30319.42000
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.API")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e96709bd61a682f42105d7ab5e8a0dbe942d73a2")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.API")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.API")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.API\obj\Release\net8.0\MovieBooking.API.GlobalUsings.g.cs
+================================================================================
+// <auto-generated/>
+global using global::Microsoft.AspNetCore.Builder;
+global using global::Microsoft.AspNetCore.Hosting;
+global using global::Microsoft.AspNetCore.Http;
+global using global::Microsoft.AspNetCore.Routing;
+global using global::Microsoft.Extensions.Configuration;
+global using global::Microsoft.Extensions.DependencyInjection;
+global using global::Microsoft.Extensions.Hosting;
+global using global::Microsoft.Extensions.Logging;
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Net.Http.Json;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\AppDbContext.cs
+================================================================================
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data.Entities;
+
+namespace MovieBooking.Data;
+
+public class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<Movie> Movies => Set<Movie>();
+    public DbSet<Genre> Genres => Set<Genre>();
+    public DbSet<MovieGenre> MovieGenres => Set<MovieGenre>();
+    public DbSet<Director> Directors => Set<Director>();
+    public DbSet<MovieDirector> MovieDirectors => Set<MovieDirector>();
+    public DbSet<Actor> Actors => Set<Actor>();
+    public DbSet<MovieActor> MovieActors => Set<MovieActor>();
+    public DbSet<Cinema> Cinemas => Set<Cinema>();
+    public DbSet<Auditorium> Auditoriums => Set<Auditorium>();
+    public DbSet<SeatType> SeatTypes => Set<SeatType>();
+    public DbSet<Seat> Seats => Set<Seat>();
+    public DbSet<Showtime> Showtimes => Set<Showtime>();
+    public DbSet<ShowtimeSeat> ShowtimeSeats => Set<ShowtimeSeat>();
+    public DbSet<Snack> Snacks => Set<Snack>();
+    public DbSet<CinemaSnack> CinemaSnacks => Set<CinemaSnack>();
+    public DbSet<Booking> Bookings => Set<Booking>();
+    public DbSet<Ticket> Tickets => Set<Ticket>();
+    public DbSet<BookingSnack> BookingSnacks => Set<BookingSnack>();
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<Payment> Payments => Set<Payment>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<MovieGenre>().ToTable("moviegenres");
+        modelBuilder.Entity<MovieDirector>().ToTable("moviedirectors");
+        modelBuilder.Entity<MovieActor>().ToTable("movieactors");
+        modelBuilder.Entity<UserRole>().ToTable("userroles");
+
+        // Composite Keys
+        modelBuilder.Entity<MovieGenre>().HasKey(x => new { x.MovieId, x.GenreId });
+        modelBuilder.Entity<MovieDirector>().HasKey(x => new { x.MovieId, x.DirectorId });
+        modelBuilder.Entity<MovieActor>().HasKey(x => new { x.MovieId, x.ActorId });
+        modelBuilder.Entity<UserRole>().HasKey(x => new { x.UserId, x.RoleId });
+
+        // Unique Constraints & Indexes
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.SeatCode })
+            .IsUnique();
+
+        modelBuilder.Entity<Seat>()
+            .HasIndex(x => new { x.AuditoriumId, x.RowLabel, x.ColumnNumber })
+            .IsUnique();
+
+        modelBuilder.Entity<ShowtimeSeat>()
+            .HasIndex(x => new { x.ShowtimeId, x.SeatId })
+            .IsUnique();
+
+        modelBuilder.Entity<Ticket>()
+            .HasIndex(x => x.ShowtimeSeatId)
+            .IsUnique();
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasIndex(x => new { x.CinemaId, x.SnackId })
+            .IsUnique();
+
+        modelBuilder.Entity<Booking>()
+            .HasIndex(x => x.BookingCode)
+            .IsUnique();
+
+        // Partial unique index for active users only
+        modelBuilder.Entity<User>()
+            .HasIndex(x => x.Email)
+            .IsUnique()
+            .HasFilter("\"deleted_at\" IS NULL");
+
+        // Relationships & Delete Behaviors
+        modelBuilder.Entity<Booking>()
+            .HasOne(b => b.User)
+            .WithMany(u => u.Bookings)
+            .HasForeignKey(b => b.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Payment>()
+            .HasOne(p => p.Booking)
+            .WithMany(b => b.Payments)
+            .HasForeignKey(p => p.BookingId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Auditorium>()
+            .HasOne(a => a.Cinema)
+            .WithMany(c => c.Auditoriums)
+            .HasForeignKey(a => a.CinemaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Showtime>()
+            .HasOne(s => s.Movie)
+            .WithMany(m => m.Showtimes)
+            .HasForeignKey(s => s.MovieId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Showtime>()
+            .HasOne(s => s.Auditorium)
+            .WithMany(a => a.Showtimes)
+            .HasForeignKey(s => s.AuditoriumId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Seat>()
+            .HasOne(s => s.SeatType)
+            .WithMany(st => st.Seats)
+            .HasForeignKey(s => s.SeatTypeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Ticket>()
+            .HasOne(t => t.ShowtimeSeat)
+            .WithOne(ss => ss.Ticket)
+            .HasForeignKey<Ticket>(t => t.ShowtimeSeatId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasOne(cs => cs.Cinema)
+            .WithMany(c => c.CinemaSnacks)
+            .HasForeignKey(cs => cs.CinemaId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<CinemaSnack>()
+            .HasOne(cs => cs.Snack)
+            .WithMany(s => s.CinemaSnacks)
+            .HasForeignKey(cs => cs.SnackId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<BookingSnack>()
+            .HasOne(bs => bs.CinemaSnack)
+            .WithMany(cs => cs.BookingSnacks)
+            .HasForeignKey(bs => bs.CinemaSnackId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // JSONB column mapping for Payment.Metadata
+        modelBuilder.Entity<Payment>()
+            .Property(p => p.Metadata)
+            .HasColumnType("jsonb");
+
+        // Global Query Filters for the 7 Soft-Deletable entities
+        modelBuilder.Entity<User>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Movie>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Cinema>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Auditorium>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<Snack>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<CinemaSnack>().HasQueryFilter(x => x.DeletedAt == null);
+        modelBuilder.Entity<SeatType>().HasQueryFilter(x => x.DeletedAt == null);
+
+        // Chuẩn hóa tên bảng sang lowercase và tên cột sang snake_case tương thích PostgreSQL
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            var tableName = entity.GetTableName();
+            if (!string.IsNullOrEmpty(tableName))
+            {
+                entity.SetTableName(tableName.ToLower());
+            }
+
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
+    }
+
+    private static string ToSnakeCase(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        return System.Text.RegularExpressions.Regex.Replace(input, @"([a-z0-9])([A-Z])", "$1_$2").ToLower();
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Constants\ShowtimeStatus.cs
+================================================================================
+namespace MovieBooking.Data.Constants;
+
+public static class ShowtimeStatus
+{
+    public const string Scheduled = "scheduled";
+    public const string Cancelled = "cancelled";
+    public const string Completed = "completed";
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Booking.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class Booking
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+    public string BookingCode { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public string Status { get; set; } = "pending"; // pending, success, cancelled
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public ICollection<Ticket> Tickets { get; set; } = new List<Ticket>();
+    public ICollection<BookingSnack> BookingSnacks { get; set; } = new List<BookingSnack>();
+    public ICollection<Payment> Payments { get; set; } = new List<Payment>();
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\BookingSnack.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class BookingSnack
+{
+    public Guid Id { get; set; }
+    public Guid BookingId { get; set; }
+    public Booking Booking { get; set; } = null!;
+    public Guid CinemaSnackId { get; set; }
+    public CinemaSnack CinemaSnack { get; set; } = null!;
+    public int Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Movie.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class Movie : ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? OriginalTitle { get; set; }
+    public string? Overview { get; set; }
+    public int DurationMin { get; set; }
+    public string? AgeRating { get; set; }
+    public string? PosterUrl { get; set; }
+    public string? BackdropUrl { get; set; }
+    public string? TrailerUrl { get; set; }
+    public DateOnly? ReleaseDate { get; set; }
+    public decimal? RatingScore { get; set; }
+    public string Status { get; set; } = "coming_soon";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
+    public ICollection<MovieGenre> MovieGenres { get; set; } = new List<MovieGenre>();
+    public ICollection<MovieDirector> MovieDirectors { get; set; } = new List<MovieDirector>();
+    public ICollection<MovieActor> MovieActors { get; set; } = new List<MovieActor>();
+    public ICollection<Showtime> Showtimes { get; set; } = new List<Showtime>();
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\MovieActor.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class MovieActor
+{
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid ActorId { get; set; }
+    public Actor Actor { get; set; } = null!;
+    public string? CharacterName { get; set; }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\MovieDirector.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class MovieDirector
+{
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid DirectorId { get; set; }
+    public Director Director { get; set; } = null!;
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\MovieGenre.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class MovieGenre
+{
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid GenreId { get; set; }
+    public Genre Genre { get; set; } = null!;
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Showtime.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class Showtime
+{
+    public Guid Id { get; set; }
+    public Guid MovieId { get; set; }
+    public Movie Movie { get; set; } = null!;
+    public Guid AuditoriumId { get; set; }
+    public Auditorium Auditorium { get; set; } = null!;
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public decimal BasePrice { get; set; }
+    public string Status { get; set; } = "scheduled"; // scheduled, cancelled, completed
+    public DateTime CreatedAt { get; set; }
+
+    public ICollection<ShowtimeSeat> ShowtimeSeats { get; set; } = new List<ShowtimeSeat>();
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\ShowtimeSeat.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class ShowtimeSeat
+{
+    public Guid Id { get; set; }
+    public Guid ShowtimeId { get; set; }
+    public Showtime Showtime { get; set; } = null!;
+    public Guid SeatId { get; set; }
+    public Seat Seat { get; set; } = null!;
+    public string Status { get; set; } = "available"; // available, reserved
+
+    public Ticket? Ticket { get; set; }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Entities\Ticket.cs
+================================================================================
+namespace MovieBooking.Data.Entities;
+
+public class Ticket
+{
+    public Guid Id { get; set; }
+    public Guid BookingId { get; set; }
+    public Booking Booking { get; set; } = null!;
+    public Guid ShowtimeSeatId { get; set; }
+    public ShowtimeSeat ShowtimeSeat { get; set; } = null!;
+    public decimal Price { get; set; }
+    public string? QrCode { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Debug\net8.0\MovieBooking.Data.AssemblyInfo.cs
+================================================================================
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e96709bd61a682f42105d7ab5e8a0dbe942d73a2")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Debug\net8.0\MovieBooking.Data.GlobalUsings.g.cs
+================================================================================
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Release\net8.0\MovieBooking.Data.AssemblyInfo.cs
+================================================================================
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//     Runtime Version:4.0.30319.42000
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+58ad7bca2ce05a1e82b932a38cf51909a38d07dd")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.Data")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\obj\Release\net8.0\MovieBooking.Data.GlobalUsings.g.cs
+================================================================================
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\Interfaces\IBookingRepository.cs
+================================================================================
+using MovieBooking.Data.Entities;
+
+namespace MovieBooking.Data.Repositories.Interfaces;
+
+public interface IBookingRepository : IGenericRepository<Booking>
+{
+    Task<Booking?> GetBookingWithDetailsAsync(Guid bookingId);
+    Task<IEnumerable<Booking>> GetUserBookingsAsync(Guid userId);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\Interfaces\IShowtimeRepository.cs
+================================================================================
+using MovieBooking.Data.Entities;
+
+namespace MovieBooking.Data.Repositories.Interfaces;
+
+public interface IShowtimeRepository : IGenericRepository<Showtime>
+{
+    Task<(IEnumerable<Showtime> Items, int TotalCount)> GetShowtimesWithDetailsAsync(
+        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom = null, DateOnly? dateTo = null, int page = 1, int pageSize = 20);
+    Task<Showtime?> GetShowtimeByIdWithDetailsAsync(Guid id);
+    Task<bool> ExistsAsync(Guid id, bool scheduledOnly = true);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\Interfaces\IShowtimeSeatRepository.cs
+================================================================================
+using MovieBooking.Data.Entities;
+
+namespace MovieBooking.Data.Repositories.Interfaces;
+
+public interface IShowtimeSeatRepository : IGenericRepository<ShowtimeSeat>
+{
+    Task<IEnumerable<ShowtimeSeat>> GetSeatsByShowtimeIdAsync(Guid showtimeId);
+    Task<IEnumerable<ShowtimeSeat>> GetAvailableSeatsAsync(Guid showtimeId, IEnumerable<Guid> seatIds);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\ShowtimeRepository.cs
+================================================================================
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data.Constants;
+using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories.Interfaces;
+
+namespace MovieBooking.Data.Repositories;
+
+public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeRepository
+{
+    public ShowtimeRepository(AppDbContext context) : base(context)
+    {
+    }
+
+    public async Task<(IEnumerable<Showtime> Items, int TotalCount)> GetShowtimesWithDetailsAsync(
+        Guid? movieId, Guid? cinemaId, DateOnly? date, DateOnly? dateFrom = null, DateOnly? dateTo = null, int page = 1, int pageSize = 20)
+    {
+        var query = GetBaseShowtimeQuery()
+            .Where(s => s.Status == ShowtimeStatus.Scheduled);
+
+        query = ApplyShowtimeFilters(query, movieId, cinemaId, date, dateFrom, dateTo);
+
+        var totalCount = await query.CountAsync();
+
+        var items = await query
+            .OrderBy(s => s.StartTime)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return (items, totalCount);
+    }
+
+    public async Task<Showtime?> GetShowtimeByIdWithDetailsAsync(Guid id)
+    {
+        return await GetBaseShowtimeQuery()
+            .FirstOrDefaultAsync(s => s.Id == id);
+    }
+
+    public async Task<bool> ExistsAsync(Guid id, bool scheduledOnly = true)
+    {
+        return await _dbSet.AnyAsync(s => s.Id == id && (!scheduledOnly || s.Status == ShowtimeStatus.Scheduled));
+    }
+
+    private IQueryable<Showtime> GetBaseShowtimeQuery()
+    {
+        return _dbSet
+            .AsNoTracking()
+            .Include(s => s.Movie)
+            .Include(s => s.Auditorium)
+                .ThenInclude(a => a.Cinema);
+    }
+
+    private IQueryable<Showtime> ApplyShowtimeFilters(
+        IQueryable<Showtime> query,
+        Guid? movieId,
+        Guid? cinemaId,
+        DateOnly? date,
+        DateOnly? dateFrom,
+        DateOnly? dateTo)
+    {
+        query = ApplyMovieFilter(query, movieId);
+        query = ApplyCinemaFilter(query, cinemaId);
+        query = ApplyDateFilter(query, date, dateFrom, dateTo);
+        return query;
+    }
+
+    private IQueryable<Showtime> ApplyMovieFilter(IQueryable<Showtime> query, Guid? movieId)
+    {
+        return movieId.HasValue ? query.Where(s => s.MovieId == movieId.Value) : query;
+    }
+
+    private IQueryable<Showtime> ApplyCinemaFilter(IQueryable<Showtime> query, Guid? cinemaId)
+    {
+        return cinemaId.HasValue ? query.Where(s => s.Auditorium.CinemaId == cinemaId.Value) : query;
+    }
+
+    private IQueryable<Showtime> ApplyDateFilter(
+        IQueryable<Showtime> query,
+        DateOnly? date,
+        DateOnly? dateFrom,
+        DateOnly? dateTo)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        if (date.HasValue)
+        {
+            var startOfDayUtc = date.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var effectiveStartUtc = startOfDayUtc < nowUtc ? nowUtc : startOfDayUtc;
+            var endOfDayUtc = startOfDayUtc.AddDays(1);
+            return query.Where(s => s.StartTime >= effectiveStartUtc && s.StartTime < endOfDayUtc);
+        }
+
+        if (dateFrom.HasValue || dateTo.HasValue)
+        {
+            if (dateFrom.HasValue)
+            {
+                var fromUtc = dateFrom.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                var effectiveFromUtc = fromUtc < nowUtc ? nowUtc : fromUtc;
+                query = query.Where(s => s.StartTime >= effectiveFromUtc);
+            }
+            else
+            {
+                query = query.Where(s => s.StartTime >= nowUtc);
+            }
+
+            if (dateTo.HasValue)
+            {
+                var toUtc = dateTo.Value.ToDateTime(new TimeOnly(23, 59, 59, 999), DateTimeKind.Utc);
+                query = query.Where(s => s.StartTime <= toUtc);
+            }
+
+            return query;
+        }
+
+        return query.Where(s => s.StartTime >= nowUtc);
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Data\Repositories\ShowtimeSeatRepository.cs
+================================================================================
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories.Interfaces;
+
+namespace MovieBooking.Data.Repositories;
+
+public class ShowtimeSeatRepository : GenericRepository<ShowtimeSeat>, IShowtimeSeatRepository
+{
+    public ShowtimeSeatRepository(AppDbContext context) : base(context)
+    {
+    }
+
+    public async Task<IEnumerable<ShowtimeSeat>> GetSeatsByShowtimeIdAsync(Guid showtimeId)
+    {
+        return await GetBaseShowtimeSeatQuery()
+            .Where(ss => ss.ShowtimeId == showtimeId)
+            .OrderBy(ss => ss.Seat.RowLabel)
+            .ThenBy(ss => ss.Seat.ColumnNumber)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<ShowtimeSeat>> GetAvailableSeatsAsync(Guid showtimeId, IEnumerable<Guid> seatIds)
+    {
+        var seatIdList = seatIds.ToList();
+        return await _dbSet
+            .AsNoTracking()
+            .Where(ss => ss.ShowtimeId == showtimeId
+                      && seatIdList.Contains(ss.SeatId)
+                      && ss.Status == "available")
+            .ToListAsync();
+    }
+
+    private IQueryable<ShowtimeSeat> GetBaseShowtimeSeatQuery()
+    {
+        return _dbSet
+            .AsNoTracking()
+            .Include(ss => ss.Showtime)
+            .Include(ss => ss.Seat)
+                .ThenInclude(s => s.SeatType);
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\DTOs\BookingDtos.cs
+================================================================================
+namespace MovieBooking.Service.DTOs;
+
+public class CreateBookingRequest
+{
+    public Guid ShowtimeId { get; set; }
+
+    public List<Guid> ShowtimeSeatIds { get; set; } = new();
+
+    public string HoldToken { get; set; } = string.Empty;
+
+    public List<BookingSnackItemRequest> Snacks { get; set; } = new();
+
+    public string PaymentProvider { get; set; } = "VNPAY";
+
+    public string PaymentMethod { get; set; } = "QR";
+}
+
+public class BookingSnackItemRequest
+{
+    public Guid CinemaSnackId { get; set; }
+    public int Quantity { get; set; }
+}
+
+public class BookingResponseDto
+{
+    public Guid Id { get; set; }
+    public string BookingCode { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public string MovieTitle { get; set; } = string.Empty;
+    public string CinemaName { get; set; } = string.Empty;
+    public string AuditoriumName { get; set; } = string.Empty;
+    public DateTime ShowtimeStart { get; set; }
+    public List<TicketDto> Tickets { get; set; } = new();
+    public List<BookingSnackDto> Snacks { get; set; } = new();
+    public string? PaymentUrl { get; set; }
+}
+
+public class TicketDto
+{
+    public Guid Id { get; set; }
+    public string SeatCode { get; set; } = string.Empty;
+    public string RowLabel { get; set; } = string.Empty;
+    public int ColumnNumber { get; set; }
+    public string SeatTypeName { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public string? QrCode { get; set; }
+}
+
+public class BookingSnackDto
+{
+    public string SnackName { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal TotalPrice => UnitPrice * Quantity;
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\DTOs\MovieDtos.cs
+================================================================================
+namespace MovieBooking.Service.DTOs;
+
+public class MovieDto
+{
+    public Guid Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? OriginalTitle { get; set; }
+    public string? Overview { get; set; }
+    public int DurationMin { get; set; }
+    public string? AgeRating { get; set; }
+    public string? PosterUrl { get; set; }
+    public string? BackdropUrl { get; set; }
+    public string? TrailerUrl { get; set; }
+    public DateOnly? ReleaseDate { get; set; }
+    public decimal? RatingScore { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public List<string> Genres { get; set; } = new();
+    public List<string> Directors { get; set; } = new();
+    public List<MovieActorDto> Actors { get; set; } = new();
+}
+
+public class MovieListResponse
+{
+    public List<MovieDto> Items { get; set; } = new();
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public int TotalItems { get; set; }
+    public int TotalPages { get; set; }
+}
+
+public class GenreDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
+public class MovieActorDto
+{
+    public Guid ActorId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? ProfilePath { get; set; }
+    public string? CharacterName { get; set; }
+}
+
+
+public class MovieActorRequest
+{
+    public Guid ActorId { get; set; }
+    public string? CharacterName { get; set; }
+}
+
+public class CreateMovieRequest
+{
+    public string Title { get; set; } = string.Empty;
+    public string? OriginalTitle { get; set; }
+    public string? Overview { get; set; }
+    public int DurationMin { get; set; }
+    public string? AgeRating { get; set; }
+    public string? PosterUrl { get; set; }
+    public string? BackdropUrl { get; set; }
+    public string? TrailerUrl { get; set; }
+    public DateOnly? ReleaseDate { get; set; }
+    public decimal? RatingScore { get; set; }
+    public string Status { get; set; } = "coming_soon";
+
+    public List<Guid> GenreIds { get; set; } = new();
+    public List<Guid> DirectorIds { get; set; } = new();
+    public List<MovieActorRequest> Actors { get; set; } = new();
+}
+
+public class UpdateMovieRequest : CreateMovieRequest
+{
+}
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\DTOs\ShowtimeDtos.cs
+================================================================================
+namespace MovieBooking.Service.DTOs;
+
+public class ShowtimeDto
+{
+    public Guid Id { get; set; }
+    public Guid MovieId { get; set; }
+    public string MovieTitle { get; set; } = string.Empty;
+    public string? PosterUrl { get; set; }
+    public Guid AuditoriumId { get; set; }
+    public string AuditoriumName { get; set; } = string.Empty;
+    public Guid CinemaId { get; set; }
+    public string CinemaName { get; set; } = string.Empty;
+    public string? City { get; set; }
+    public string? Address { get; set; }
+    public string? HallType { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public decimal BasePrice { get; set; }
+    public string Status { get; set; } = string.Empty;
+}
+
+public class ShowtimeSeatDto
+{
+    public Guid Id { get; set; }
+    public Guid ShowtimeId { get; set; }
+    public Guid SeatId { get; set; }
+    public string RowLabel { get; set; } = string.Empty;
+    public int ColumnNumber { get; set; }
+    public string SeatCode { get; set; } = string.Empty;
+    public string SeatTypeName { get; set; } = string.Empty;
+    public string ColorCode { get; set; } = string.Empty;
+    public decimal ExtraPrice { get; set; }
+    public decimal TotalPrice { get; set; }
+    public string Status { get; set; } = "available"; // available, reserved
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Interfaces\IMovieService.cs
+================================================================================
+// File này để trống để tránh lỗi CS0104 Ambiguous Reference giữa MovieBooking.Service.Interfaces và MovieBooking.Service.Services
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\obj\Debug\net8.0\MovieBooking.Service.AssemblyInfo.cs
+================================================================================
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.Service")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e96709bd61a682f42105d7ab5e8a0dbe942d73a2")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.Service")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.Service")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\obj\Debug\net8.0\MovieBooking.Service.GlobalUsings.g.cs
+================================================================================
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\obj\Release\net8.0\MovieBooking.Service.AssemblyInfo.cs
+================================================================================
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//     Runtime Version:4.0.30319.42000
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("MovieBooking.Service")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+58ad7bca2ce05a1e82b932a38cf51909a38d07dd")]
+[assembly: System.Reflection.AssemblyProductAttribute("MovieBooking.Service")]
+[assembly: System.Reflection.AssemblyTitleAttribute("MovieBooking.Service")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\obj\Release\net8.0\MovieBooking.Service.GlobalUsings.g.cs
+================================================================================
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Services\IMovieService.cs
+================================================================================
+
+using MovieBooking.Service.DTOs;
+
+namespace MovieBooking.Service.Services;
+
+public interface IMovieService
+{
+    Task<MovieListResponse> GetMoviesAsync(
+        string? status,
+        string? search,
+        string? genre,
+        string sortBy,
+        string? city,
+        Guid? cinemaId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto?> GetMovieByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
+    Task<List<GenreDto>> GetGenresAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto> CreateMovieAsync(
+        CreateMovieRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<MovieDto?> UpdateMovieAsync(
+        Guid id,
+        UpdateMovieRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> SoftDeleteMovieAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Backend\MovieBooking.Service\Services\MovieService.cs
+================================================================================
+
+using Microsoft.EntityFrameworkCore;
+using MovieBooking.Data;
+using MovieBooking.Data.Entities;
+using MovieBooking.Service.DTOs;
+
+namespace MovieBooking.Service.Services;
+
+public class MovieService : IMovieService
+{
+    private readonly AppDbContext _dbContext;
+
+    public MovieService(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<MovieListResponse> GetMoviesAsync(
+        string? status,
+        string? search,
+        string? genre,
+        string sortBy,
+        string? city,
+        Guid? cinemaId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = BuildMovieQuery(status, search, genre);
+
+        var selectedCity = city?.Trim();
+
+        if (!string.IsNullOrWhiteSpace(selectedCity) ||
+            cinemaId.HasValue)
+        {
+            query = query.Where(movie =>
+                _dbContext.Showtimes.Any(showtime =>
+                    showtime.MovieId == movie.Id &&
+                    (!cinemaId.HasValue ||
+                     showtime.Auditorium.CinemaId == cinemaId.Value) &&
+                    (string.IsNullOrWhiteSpace(selectedCity) ||
+                     (showtime.Auditorium.Cinema.City != null &&
+                      EF.Functions.ILike(
+                          showtime.Auditorium.Cinema.City,
+                          selectedCity)))));
+        }
+
+        var totalItems = await query.CountAsync(cancellationToken);
+
+        IOrderedQueryable<Movie> orderedQuery = sortBy switch
+        {
+            "title" => query
+                .OrderBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id),
+
+            "rating" => query
+                .OrderByDescending(movie => movie.RatingScore ?? -1m)
+                .ThenBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id),
+
+            _ => query
+                .OrderByDescending(movie => movie.ReleaseDate)
+                .ThenBy(movie => movie.Title)
+                .ThenBy(movie => movie.Id)
+        };
+
+        var movies = await orderedQuery
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        await PopulateRelationsAsync(movies, cancellationToken);
+
+        return new MovieListResponse
+        {
+            Items = movies.Select(MapMovie).ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalItems = totalItems,
+            TotalPages = (int)Math.Ceiling(
+                totalItems / (double)pageSize)
+        };
+    }
+
+    public async Task<MovieDto?> GetMovieByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await BuildMovieQuery(null, null, null)
+            .FirstOrDefaultAsync(
+                item => item.Id == id,
+                cancellationToken);
+
+        if (movie is null)
+            return null;
+
+        await PopulateRelationsAsync(
+            new List<Movie> { movie },
+            cancellationToken);
+
+        return MapMovie(movie);
+    }
+
+    public async Task<List<GenreDto>> GetGenresAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Genres
+            .AsNoTracking()
+            .OrderBy(genre => genre.Name)
+            .Select(genre => new GenreDto
+            {
+                Id = genre.Id,
+                Name = genre.Name
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<MovieDto> CreateMovieAsync(
+        CreateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMovieRequest(request);
+
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+
+        var actors = request.Actors
+            .GroupBy(x => x.ActorId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (await _dbContext.Genres.CountAsync(
+                x => genreIds.Contains(x.Id),
+                cancellationToken) != genreIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều thể loại không tồn tại.");
+        }
+
+        if (await _dbContext.Directors.CountAsync(
+                x => directorIds.Contains(x.Id),
+                cancellationToken) != directorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều đạo diễn không tồn tại.");
+        }
+
+        var actorIds = actors.Select(x => x.ActorId).ToList();
+
+        if (await _dbContext.Actors.CountAsync(
+                x => actorIds.Contains(x.Id),
+                cancellationToken) != actorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều diễn viên không tồn tại.");
+        }
+
+        var now = DateTime.UtcNow;
+
+        var movie = new Movie
+        {
+            Id = Guid.NewGuid(),
+            Title = request.Title.Trim(),
+            OriginalTitle = request.OriginalTitle,
+            Overview = request.Overview,
+            DurationMin = request.DurationMin,
+            AgeRating = request.AgeRating,
+            PosterUrl = request.PosterUrl,
+            BackdropUrl = request.BackdropUrl,
+            TrailerUrl = request.TrailerUrl,
+            ReleaseDate = request.ReleaseDate,
+            RatingScore = request.RatingScore,
+            Status = request.Status,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        _dbContext.Movies.Add(movie);
+
+        foreach (var genreId in genreIds)
+        {
+            _dbContext.MovieGenres.Add(new MovieGenre
+            {
+                MovieId = movie.Id,
+                GenreId = genreId
+            });
+        }
+
+        foreach (var directorId in directorIds)
+        {
+            _dbContext.MovieDirectors.Add(new MovieDirector
+            {
+                MovieId = movie.Id,
+                DirectorId = directorId
+            });
+        }
+
+        foreach (var actor in actors)
+        {
+            _dbContext.MovieActors.Add(new MovieActor
+            {
+                MovieId = movie.Id,
+                ActorId = actor.ActorId,
+                CharacterName = actor.CharacterName
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await PopulateRelationsAsync(
+            new List<Movie> { movie },
+            cancellationToken);
+
+        return MapMovie(movie);
+    }
+
+    public async Task<MovieDto?> UpdateMovieAsync(
+        Guid id,
+        UpdateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMovieRequest(request);
+
+        var movie = await _dbContext.Movies
+            .FirstOrDefaultAsync(
+                x => x.Id == id,
+                cancellationToken);
+
+        if (movie is null)
+            return null;
+
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+
+        var actors = request.Actors
+            .GroupBy(x => x.ActorId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (await _dbContext.Genres.CountAsync(
+                x => genreIds.Contains(x.Id),
+                cancellationToken) != genreIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều thể loại không tồn tại.");
+        }
+
+        if (await _dbContext.Directors.CountAsync(
+                x => directorIds.Contains(x.Id),
+                cancellationToken) != directorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều đạo diễn không tồn tại.");
+        }
+
+        var actorIds = actors.Select(x => x.ActorId).ToList();
+
+        if (await _dbContext.Actors.CountAsync(
+                x => actorIds.Contains(x.Id),
+                cancellationToken) != actorIds.Count)
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều diễn viên không tồn tại.");
+        }
+
+        movie.Title = request.Title.Trim();
+        movie.OriginalTitle = request.OriginalTitle;
+        movie.Overview = request.Overview;
+        movie.DurationMin = request.DurationMin;
+        movie.AgeRating = request.AgeRating;
+        movie.PosterUrl = request.PosterUrl;
+        movie.BackdropUrl = request.BackdropUrl;
+        movie.TrailerUrl = request.TrailerUrl;
+        movie.ReleaseDate = request.ReleaseDate;
+        movie.RatingScore = request.RatingScore;
+        movie.Status = request.Status;
+        movie.UpdatedAt = DateTime.UtcNow;
+
+        var oldGenres = await _dbContext.MovieGenres
+            .Where(x => x.MovieId == id)
+            .ToListAsync(cancellationToken);
+
+        var oldDirectors = await _dbContext.MovieDirectors
+            .Where(x => x.MovieId == id)
+            .ToListAsync(cancellationToken);
+
+        var oldActors = await _dbContext.MovieActors
+            .Where(x => x.MovieId == id)
+            .ToListAsync(cancellationToken);
+
+        _dbContext.MovieGenres.RemoveRange(oldGenres);
+        _dbContext.MovieDirectors.RemoveRange(oldDirectors);
+        _dbContext.MovieActors.RemoveRange(oldActors);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var genreId in genreIds)
+        {
+            _dbContext.MovieGenres.Add(new MovieGenre
+            {
+                MovieId = id,
+                GenreId = genreId
+            });
+        }
+
+        foreach (var directorId in directorIds)
+        {
+            _dbContext.MovieDirectors.Add(new MovieDirector
+            {
+                MovieId = id,
+                DirectorId = directorId
+            });
+        }
+
+        foreach (var actor in actors)
+        {
+            _dbContext.MovieActors.Add(new MovieActor
+            {
+                MovieId = id,
+                ActorId = actor.ActorId,
+                CharacterName = actor.CharacterName
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        movie.MovieGenres = new List<MovieGenre>();
+        movie.MovieDirectors = new List<MovieDirector>();
+        movie.MovieActors = new List<MovieActor>();
+
+        await PopulateRelationsAsync(
+            new List<Movie> { movie },
+            cancellationToken);
+
+        return MapMovie(movie);
+    }
+
+    public async Task<bool> SoftDeleteMovieAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var movie = await _dbContext.Movies
+            .FirstOrDefaultAsync(
+                x => x.Id == id,
+                cancellationToken);
+
+        if (movie is null)
+            return false;
+
+        movie.DeletedAt = DateTime.UtcNow;
+        movie.UpdatedAt = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    private static void ValidateMovieRequest(
+        CreateMovieRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            throw new ArgumentException(
+                "Tên phim không được để trống.");
+
+        if (request.DurationMin <= 0)
+            throw new ArgumentException(
+                "Thời lượng phim phải lớn hơn 0.");
+
+        if (request.RatingScore is < 0 or > 10)
+            throw new ArgumentException(
+                "Điểm đánh giá phải từ 0 đến 10.");
+
+        if (request.GenreIds.Count == 0)
+            throw new ArgumentException(
+                "Phải chọn ít nhất một thể loại.");
+
+        if (request.Actors.Any(x => x.ActorId == Guid.Empty))
+            throw new ArgumentException(
+                "ID diễn viên không hợp lệ.");
+    }
+
+    private IQueryable<Movie> BuildMovieQuery(
+        string? status,
+        string? search,
+        string? genre)
+    {
+        var query = _dbContext.Movies
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(
+                movie => movie.Status == status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{search.Trim()}%";
+
+            query = query.Where(movie =>
+                EF.Functions.ILike(movie.Title, pattern) ||
+                (movie.OriginalTitle != null &&
+                 EF.Functions.ILike(
+                     movie.OriginalTitle, pattern)) ||
+                movie.MovieGenres.Any(movieGenre =>
+                    EF.Functions.ILike(
+                        movieGenre.Genre.Name, pattern)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(genre))
+        {
+            var selectedGenre = genre.Trim();
+
+            query = query.Where(movie =>
+                movie.MovieGenres.Any(movieGenre =>
+                    EF.Functions.ILike(
+                        movieGenre.Genre.Name,
+                        selectedGenre)));
+        }
+
+        return query;
+    }
+
+    private async Task PopulateRelationsAsync(
+        List<Movie> movies,
+        CancellationToken cancellationToken)
+    {
+        if (movies.Count == 0)
+            return;
+
+        var movieIds = movies
+            .Select(movie => movie.Id)
+            .ToHashSet();
+
+        var movieGenres = await _dbContext.MovieGenres
+            .FromSqlRaw(
+                "SELECT movie_id, genre_id FROM moviegenres")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var movieDirectors = await _dbContext.MovieDirectors
+            .FromSqlRaw(
+                "SELECT movie_id, director_id FROM moviedirectors")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var movieActors = await _dbContext.MovieActors
+            .FromSqlRaw(
+                "SELECT movie_id, actor_id, character_name FROM movieactors")
+            .AsNoTracking()
+            .Where(x => movieIds.Contains(x.MovieId))
+            .ToListAsync(cancellationToken);
+
+        var genreIds = movieGenres
+            .Select(x => x.GenreId)
+            .ToHashSet();
+
+        var directorIds = movieDirectors
+            .Select(x => x.DirectorId)
+            .ToHashSet();
+
+        var actorIds = movieActors
+            .Select(x => x.ActorId)
+            .ToHashSet();
+
+        var genres = await _dbContext.Genres
+            .AsNoTracking()
+            .Where(x => genreIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var directors = await _dbContext.Directors
+            .AsNoTracking()
+            .Where(x => directorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var actors = await _dbContext.Actors
+            .AsNoTracking()
+            .Where(x => actorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        foreach (var movie in movies)
+        {
+            movie.MovieGenres = movieGenres
+                .Where(x =>
+                    x.MovieId == movie.Id &&
+                    genres.ContainsKey(x.GenreId))
+                .Select(x => new MovieGenre
+                {
+                    MovieId = x.MovieId,
+                    GenreId = x.GenreId,
+                    Genre = genres[x.GenreId]
+                })
+                .ToList();
+
+            movie.MovieDirectors = movieDirectors
+                .Where(x =>
+                    x.MovieId == movie.Id &&
+                    directors.ContainsKey(x.DirectorId))
+                .Select(x => new MovieDirector
+                {
+                    MovieId = x.MovieId,
+                    DirectorId = x.DirectorId,
+                    Director = directors[x.DirectorId]
+                })
+                .ToList();
+
+            movie.MovieActors = movieActors
+                .Where(x =>
+                    x.MovieId == movie.Id &&
+                    actors.ContainsKey(x.ActorId))
+                .Select(x => new MovieActor
+                {
+                    MovieId = x.MovieId,
+                    ActorId = x.ActorId,
+                    CharacterName = x.CharacterName,
+                    Actor = actors[x.ActorId]
+                })
+                .ToList();
+        }
+    }
+
+    private static MovieDto MapMovie(Movie movie)
+    {
+        return new MovieDto
+        {
+            Id = movie.Id,
+            Title = movie.Title,
+            OriginalTitle = movie.OriginalTitle,
+            Overview = movie.Overview,
+            DurationMin = movie.DurationMin,
+            AgeRating = movie.AgeRating,
+            PosterUrl = movie.PosterUrl,
+            BackdropUrl = movie.BackdropUrl,
+            TrailerUrl = movie.TrailerUrl,
+            ReleaseDate = movie.ReleaseDate,
+            RatingScore = movie.RatingScore,
+            Status = movie.Status,
+
+            Genres = movie.MovieGenres
+                .OrderBy(x => x.Genre.Name)
+                .Select(x => x.Genre.Name)
+                .ToList(),
+
+            Directors = movie.MovieDirectors
+                .OrderBy(x => x.Director.Name)
+                .Select(x => x.Director.Name)
+                .ToList(),
+
+            Actors = movie.MovieActors
+                .OrderBy(x => x.Actor.Name)
+                .Select(x => new MovieActorDto
+                {
+                    ActorId = x.ActorId,
+                    Name = x.Actor.Name,
+                    ProfilePath = x.Actor.ProfilePath,
+                    CharacterName = x.CharacterName
+                })
+                .ToList()
+        };
+    }
+}
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\api\axiosInstance.js
+================================================================================
+import axios from 'axios';
+
+// Base URL kết nối tới Backend ASP.NET Core 8 Web API (Port 5000)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const TOKEN_KEY = 'cinema_access_token';
+
+const axiosInstance = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 10000,
+});
+
+// Request Interceptor: Đính kèm JWT token vào Header nếu có
+axiosInstance.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem(TOKEN_KEY) || localStorage.getItem('token');
+    if (token && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response Interceptor: Chuẩn hóa dữ liệu & tương thích cả 2 cách gọi
+axiosInstance.interceptors.response.use(
+  (response) => {
+    // Tạo alias .data trỏ về chính nó:
+    // Vừa cho phép truy cập trực tiếp res.items (Dev C), vừa tương thích hàm unwrap(res) => res.data (Dev E)
+    if (response.data && typeof response.data === 'object' && !('data' in response.data)) {
+      Object.defineProperty(response.data, 'data', {
+        value: response.data,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    return response.data;
+  },
+  (error) => {
+    // Trích xuất thông điệp lỗi tiếng Việt từ Backend nếu có
+    const backendMessage =
+      error.response?.data?.message ||
+      error.response?.data?.title ||
+      error.response?.data?.error;
+
+    if (backendMessage && typeof backendMessage === 'string') {
+      error.message = backendMessage;
+    }
+
+    if (error.response?.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem('cinema_user');
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.dispatchEvent(new CustomEvent('cinema:auth-expired'));
+    }
+    return Promise.reject(error);
+  }
+);
+
+export { API_BASE_URL, TOKEN_KEY };
+export default axiosInstance;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\api\useBookings.js
+================================================================================
+import axiosInstance from './axiosInstance';
+
+/**
+ * API Module: Bookings & Tickets (Phụ trách: Dev D)
+ * Quản lý toàn bộ API Đặt vé (Transaction DB), Lịch sử đặt vé và Xuất vé điện tử QR Code
+ */
+
+export const useBookings = {
+
+};
+
+export default useBookings;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\api\useMovies.js
+================================================================================
+import axiosInstance from './axiosInstance';
+
+const useMovies = {
+    async getAllMovies({
+        status,
+        search,
+        genre,
+        city,
+        cinemaId,
+        sortBy = 'latest',
+        page = 1,
+        pageSize = 12
+    } = {}) {
+        const params = {
+            page,
+            pageSize,
+            sortBy
+        };
+
+        const optionalParams = {
+            status,
+            search,
+            genre: genre && genre !== 'all' ? genre : undefined,
+            city,
+            cinemaId
+        };
+
+        for (const [key, value] of Object.entries(optionalParams)) {
+            if (
+                value !== undefined &&
+                value !== null &&
+                String(value).trim() !== ''
+            ) {
+                params[key] = String(value).trim();
+            }
+        }
+
+        return axiosInstance.get('/movies', { params });
+    },
+
+    async getMovieById(id) {
+        if (!id) {
+            throw new Error('ID phim không được để trống');
+        }
+
+        return axiosInstance.get(`/movies/${encodeURIComponent(id)}`);
+    },
+
+    async getCinemas() {
+        return axiosInstance.get('/cinemas');
+    },
+
+    async getGenres() {
+        return axiosInstance.get('/genres');
+    },
+
+    async createMovie(data) {
+        return axiosInstance.post('/movies', data);
+    },
+
+    async updateMovie(id, data) {
+        if (!id) {
+            throw new Error('ID phim không được để trống');
+        }
+
+        return axiosInstance.put(
+            `/movies/${encodeURIComponent(id)}`,
+            data
+        );
+    },
+
+    async deleteMovie(id) {
+        if (!id) {
+            throw new Error('ID phim không được để trống');
+        }
+
+        return axiosInstance.delete(
+            `/movies/${encodeURIComponent(id)}`
+        );
+    },
+
+    async getTopMoviesReport() {
+        return axiosInstance.get('/movies/reports/top');
+    }
+};
+
+export { useMovies };
+export default useMovies;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\api\useShowtimes.js
+================================================================================
+import axiosInstance from './axiosInstance';
+
+/**
+ * API Module: Showtimes & Real-time Seat Hold Engine (Phụ trách: Dev C)
+ * Quản lý toàn bộ API Lịch chiếu, Sơ đồ ghế suất chiếu và Tạm giữ ghế 5 phút (Redis)
+ */
+export const useShowtimes = {
+  // Lấy danh sách suất chiếu (hỗ trợ lọc theo movieId, cinemaId, date)
+  getShowtimes: async (params = {}) => {
+    return await axiosInstance.get('/showtimes', { params });
+  },
+
+  // Lấy chi tiết 1 suất chiếu theo ID
+  getShowtimeById: async (id) => {
+    return await axiosInstance.get(`/showtimes/${id}`);
+  },
+
+  // Lấy sơ đồ 48 ghế thực tế của suất chiếu
+  getShowtimeSeats: async (showtimeId) => {
+    return await axiosInstance.get(`/showtimes/${showtimeId}/seats`);
+  },
+};
+
+export default useShowtimes;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\components\booking\BookingSummary.jsx
+================================================================================
+import React, { useState, useEffect } from 'react';
+import useSnacks from '../../api/useSnacks';
+
+/**
+ * Component: BookingSummary.jsx
+ * Người sở hữu: Dev D
+ * Trách nhiệm: Chọn combo bắp nước, tính tổng tiền, nhận holdToken từ Dev C và gọi API POST /api/bookings
+ */
+const BookingSummary = ({ holdToken, totalHoldPrice, cinemaId }) => {
+    // Local state quản lý dữ liệu và số lượng bắp nước
+    const [snacks, setSnacks] = useState([]);
+    const [quantities, setQuantities] = useState({});
+
+    // Gọi API lấy bắp nước khi nhận được ID rạp
+    // Gọi API lấy bắp nước khi nhận được ID rạp
+    useEffect(() => {
+        if (cinemaId) {
+            useSnacks.getCinemaSnacks(cinemaId).then(data => {
+                // Nhận thẳng dữ liệu và gán, luôn dự phòng mảng rỗng
+                setSnacks(data || []);
+                setQuantities({});
+            }).catch(error => {
+                console.error("Lỗi lấy dữ liệu bắp nước:", error);
+                setSnacks([]);
+            });
+        }
+    }, [cinemaId]);
+
+    // Hàm xử lý tăng/giảm
+    const handleIncrease = (snackId) => {
+        setQuantities(prev => ({ ...prev, [snackId]: (prev[snackId] || 0) + 1 }));
+    };
+
+    const handleDecrease = (snackId) => {
+        setQuantities(prev => {
+            const currentQty = prev[snackId] || 0;
+            if (currentQty <= 0) return prev;
+            return { ...prev, [snackId]: currentQty - 1 };
+        });
+    };
+
+    // Tính toán tổng tiền
+    const snacksTotal = snacks?.reduce((sum, snack) => {
+        return sum + (snack.price * (quantities[snack.id] || 0));
+    }, 0);
+
+    const finalTotal = (totalHoldPrice || 0) + snacksTotal;
+
+    const handleBooking = async () => {
+        if (!holdToken) return;
+
+        // Lọc ra các món bắp nước có số lượng > 0
+        const selectedSnacks = Object.entries(quantities)
+            .filter(([id, qty]) => qty > 0)
+            .map(([id, qty]) => ({ snackId: id, quantity: qty }));
+
+        const orderPayload = {
+            holdToken: holdToken,
+            cinemaId: cinemaId,
+            snacks: selectedSnacks,
+            totalAmount: finalTotal
+        };
+
+        console.log("Đang gửi API POST /api/bookings với dữ liệu:", orderPayload);
+    };
+
+    return (
+        <div className="bg-slate-800/60 p-6 rounded-xl border border-slate-700">
+            <h2 className="text-xl font-bold text-white mb-3">Bắp Nước & Thanh Toán (Dev D)</h2>
+            <p className="text-slate-400 text-sm mb-4">
+                Chọn bắp nước từ menu cụm rạp, tính tổng tiền và bấm đặt vé tạo đơn hàng.
+            </p>
+
+            {/* KHU VỰC HIỂN THỊ DANH SÁCH BẮP NƯỚC */}
+            <div className="mb-6 space-y-3 max-h-64 overflow-y-auto pr-2">
+                {snacks?.length === 0 ? (
+                    <p className="text-slate-400 text-sm italic">Đang tải menu bắp nước...</p>
+                ) : (
+                    snacks?.map(snack => (
+                        <div key={snack.id} className="flex justify-between items-center bg-slate-700/40 p-3 rounded-lg border border-slate-600/50">
+                            <div className="flex items-center gap-3">
+                                <img
+                                    src={snack.imageUrl}
+                                    alt={snack.name}
+                                    className="w-12 h-12 object-cover rounded-md"
+                                />
+                                <div>
+                                    <h4 className="text-sm font-semibold text-white">{snack.name}</h4>
+                                    <p className="text-xs text-slate-300">{(snack.price || 0).toLocaleString()} đ</p>
+                                </div>
+                            </div>
+
+                            {/* Nút tăng giảm số lượng */}
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => handleDecrease(snack.id)}
+                                    className="w-8 h-8 flex items-center justify-center bg-slate-600 hover:bg-slate-500 text-white rounded-md transition-colors"
+                                >
+                                    -
+                                </button>
+                                <span className="text-white text-sm font-medium w-4 text-center">
+                                    {quantities[snack.id] || 0}
+                                </span>
+                                <button
+                                    onClick={() => handleIncrease(snack.id)}
+                                    className="w-8 h-8 flex items-center justify-center bg-slate-600 hover:bg-slate-500 text-white rounded-md transition-colors"
+                                >
+                                    +
+                                </button>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+
+            {/* KHU VỰC TỔNG KẾT TÀI CHÍNH */}
+            <div className="space-y-3">
+                <div className="flex justify-between text-sm text-slate-300">
+                    <span>Tiền vé tạm tính:</span>
+                    <span className="font-semibold text-white">{(totalHoldPrice || 0).toLocaleString()} đ</span>
+                </div>
+                <div className="flex justify-between text-sm text-slate-300">
+                    <span>Tiền bắp nước:</span>
+                    <span className="font-semibold text-white">{(snacksTotal || 0).toLocaleString()} đ</span>
+                </div>
+                <div className="border-t border-slate-700 pt-3 flex justify-between font-bold text-white">
+                    <span>Tổng thanh toán:</span>
+                    <span className="text-red-500">{(finalTotal || 0).toLocaleString()} đ</span>
+                </div>
+
+                {/* Nút đặt vé tạm giữ nguyên giao diện gốc */}
+                
+                <button
+                    onClick={handleBooking}
+                    className="w-full mt-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!holdToken}
+                >
+                    {holdToken ? 'Tiến Hành Đặt Vé' : 'Vui Lòng Chọn Ghế Trước'}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+export default BookingSummary;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\components\booking\CityShowtimeModal.jsx
+================================================================================
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useShowtimes } from '../../api';
+import { 
+  X, 
+  Calendar, 
+  MapPin, 
+  Clock, 
+  Film, 
+  Ticket, 
+  ChevronRight, 
+  ChevronLeft,
+  Loader2,
+  Sparkles
+} from 'lucide-react';
+
+// Danh sách chuẩn 34 Tỉnh / Thành phố tại Việt Nam như ảnh mẫu
+const CITIES_LIST = [
+  'Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng', 'Cần Thơ', 'Đồng Nai', 'Hải Phòng',
+  'Quảng Ninh', 'Bà Rịa-Vũng Tàu', 'Bình Định', 'Bình Dương', 'Đắk Lắk', 'Trà Vinh',
+  'Yên Bái', 'Vĩnh Long', 'Kiên Giang', 'Hậu Giang', 'Hà Tĩnh', 'Phú Yên',
+  'Đồng Tháp', 'Bạc Liêu', 'Hưng Yên', 'Khánh Hòa', 'Kon Tum', 'Lạng Sơn',
+  'Nghệ An', 'Phú Thọ', 'Quảng Ngãi', 'Sóc Trăng', 'Sơn La', 'Tây Ninh',
+  'Thái Nguyên', 'Tiền Giang', 'Thừa Thiên Huế', 'Lâm Đồng'
+];
+
+// Hàm so khớp linh hoạt tên tỉnh thành giữa Database và UI
+const matchesCity = (cinemaCity, selectedCity) => {
+  if (!cinemaCity || !selectedCity) return false;
+  const c = cinemaCity.toLowerCase().trim();
+  const s = selectedCity.toLowerCase().trim();
+  if (c === s) return true;
+  if (s === 'hồ chí minh' && (c.includes('hồ chí minh') || c.includes('hcm') || c.includes('sài gòn'))) return true;
+  if (s === 'hà nội' && c.includes('hà nội')) return true;
+  if (s === 'đà nẵng' && c.includes('đà nẵng')) return true;
+  if (s === 'cần thơ' && c.includes('cần thơ')) return true;
+  if (s === 'hải phòng' && c.includes('hải phòng')) return true;
+  if (s === 'đồng nai' && (c.includes('đồng nai') || c.includes('biên hòa'))) return true;
+  if (s === 'bà rịa-vũng tàu' && (c.includes('vũng tàu') || c.includes('bà rịa'))) return true;
+  if (s === 'khánh hòa' && (c.includes('khánh hòa') || c.includes('nha trang'))) return true;
+  if (s === 'bình định' && (c.includes('bình định') || c.includes('quy nhơn'))) return true;
+  if (s === 'thừa thiên huế' && (c.includes('huế') || c.includes('thừa thiên'))) return true;
+  return c.includes(s) || s.includes(c);
+};
+
+// Sinh danh sách 30 ngày tính từ ngày hiện tại
+const generate30Days = () => {
+  const days = [];
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayNamesVi = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+  for (let i = 0; i < 30; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+
+    days.push({
+      dateStr,
+      month,
+      day,
+      dayOfWeek: dayNames[d.getDay()],
+      dayOfWeekVi: dayNamesVi[d.getDay()],
+      isToday: i === 0,
+      fullDateLabel: `${day}/${month}/${year}`
+    });
+  }
+  return days;
+};
+
+const CityShowtimeModal = ({ isOpen, onClose, movie, initialDate }) => {
+  const navigate = useNavigate();
+  const all30Days = useMemo(() => generate30Days(), []);
+
+  // 2 tầng ngày: Tầng 1 (15 ngày đầu), Tầng 2 (15 ngày tiếp theo)
+  const tier1Days = useMemo(() => all30Days.slice(0, 15), [all30Days]);
+  const tier2Days = useMemo(() => all30Days.slice(15, 30), [all30Days]);
+
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedCity, setSelectedCity] = useState('Hồ Chí Minh');
+  const [selectedFormat, setSelectedFormat] = useState('all');
+  const [showtimes, setShowtimes] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // Ref và hàm trượt ngày mượt mà
+  const dateScrollRef = useRef(null);
+  const scrollDates = (direction) => {
+    if (dateScrollRef.current) {
+      const scrollAmount = direction === 'left' ? -260 : 260;
+      dateScrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  // Khởi tạo ngày ban đầu khi mở modal
+  useEffect(() => {
+    if (isOpen) {
+      if (initialDate) {
+        setSelectedDate(initialDate);
+      } else if (all30Days.length > 0) {
+        setSelectedDate(all30Days[0].dateStr);
+      }
+    }
+  }, [isOpen, initialDate, all30Days]);
+
+  // Tải danh sách suất chiếu của phim theo ngày đã chọn
+  useEffect(() => {
+    if (!isOpen || !movie?.id || !selectedDate) return;
+
+    const fetchShowtimes = async () => {
+      try {
+        setLoading(true);
+        const data = await useShowtimes.getShowtimes({
+          movieId: movie.id,
+          date: selectedDate,
+          pageSize: 100 // Lấy tối đa 100 suất chiếu để nạp đầy đủ rạp
+        });
+
+        setShowtimes(data?.items || []);
+      } catch (err) {
+        console.error('Lỗi khi tải lịch chiếu cho modal:', err);
+        setShowtimes([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchShowtimes();
+  }, [isOpen, movie?.id, selectedDate]);
+
+  // Danh sách các tỉnh thành ĐANG CÓ chi nhánh có suất chiếu của phim này
+  const citiesWithShowtimes = useMemo(() => {
+    return CITIES_LIST.filter((city) =>
+      showtimes.some((st) => matchesCity(st.city, city))
+    );
+  }, [showtimes]);
+
+  // Tự động chọn tỉnh/thành phố có chi nhánh có suất chiếu (ưu tiên HCM hoặc tỉnh đầu tiên có rạp) ngay khi bấm vào
+  useEffect(() => {
+    if (citiesWithShowtimes.length > 0) {
+      if (citiesWithShowtimes.includes('Hồ Chí Minh')) {
+        setSelectedCity('Hồ Chí Minh');
+      } else if (!citiesWithShowtimes.includes(selectedCity)) {
+        setSelectedCity(citiesWithShowtimes[0]);
+      }
+    }
+  }, [citiesWithShowtimes]);
+
+  // Lọc theo Tỉnh/Thành phố đã chọn và định dạng chiếu
+  const filteredShowtimes = useMemo(() => {
+    return showtimes.filter((st) => {
+      const matchCity = matchesCity(st.city, selectedCity);
+      const matchFormat =
+        selectedFormat === 'all' ||
+        (st.hallType && st.hallType.toLowerCase().includes(selectedFormat.toLowerCase())) ||
+        (st.auditoriumName && st.auditoriumName.toLowerCase().includes(selectedFormat.toLowerCase()));
+      return matchCity && matchFormat;
+    });
+  }, [showtimes, selectedCity, selectedFormat]);
+
+  // Gom nhóm suất chiếu theo Rạp -> Loại phòng
+  const groupedCinemas = useMemo(() => {
+    const result = {};
+
+    filteredShowtimes.forEach((st) => {
+      const cinemaName = st.cinemaName || 'Rạp Chiếu Phim';
+      if (!result[cinemaName]) {
+        result[cinemaName] = {
+          cinemaName,
+          address: st.address || st.city || '',
+          formats: {},
+        };
+      }
+
+      const formatLabel = st.hallType ? `Rạp ${st.hallType}` : `Phòng ${st.auditoriumName || '2D'}`;
+      if (!result[cinemaName].formats[formatLabel]) {
+        result[cinemaName].formats[formatLabel] = [];
+      }
+
+      result[cinemaName].formats[formatLabel].push(st);
+    });
+
+    // Sắp xếp các suất chiếu trong từng phòng theo giờ tăng dần
+    Object.values(result).forEach((cinema) => {
+      Object.keys(cinema.formats).forEach((fmt) => {
+        cinema.formats[fmt].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+      });
+    });
+
+    return Object.values(result);
+  }, [filteredShowtimes]);
+
+  if (!isOpen || !movie) return null;
+
+  const handleSelectShowtime = (showtimeId) => {
+    onClose();
+    navigate(`/booking/${showtimeId}`);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+      <div 
+        className="relative w-full max-w-[1360px] bg-gradient-to-b from-[#161824] via-[#10121a] to-[#0c0d14] border border-white/20 rounded-none shadow-2xl shadow-red-950/40 max-h-[90vh] flex flex-col overflow-hidden text-white"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 1. HEADER CỐ ĐỊNH: Luôn nhìn thấy thông tin phim & nút X đóng modal */}
+        <div className="flex-shrink-0 p-5 sm:p-6 pb-4 border-b border-white/10 bg-[#161824]/95 backdrop-blur-md relative z-10">
+          <button
+            onClick={onClose}
+            className="absolute top-5 right-5 w-9 h-9 rounded-none bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-gray-300 hover:text-white transition-all duration-200 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pr-12">
+            <img
+              src={movie.posterUrl || 'https://picsum.photos/300/450'}
+              alt={movie.title}
+              className="w-16 h-24 sm:w-20 sm:h-28 object-cover rounded-xl shadow-lg border border-white/10 flex-shrink-0"
+            />
+            <div>
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-md bg-red-600/30 border border-red-500/40 text-red-400 text-xs font-bold uppercase tracking-wider">
+                  {movie.ageRating || 'P'}
+                </span>
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-gray-400" />
+                  {movie.durationMin || 90} phút
+                </span>
+                {movie.ratingScore && (
+                  <span className="text-xs text-amber-400 font-semibold flex items-center gap-1">
+                    ★ {Number(movie.ratingScore).toFixed(1)}
+                  </span>
+                )}
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wide mb-1">
+                {movie.title}
+              </h2>
+              <p className="text-xs sm:text-sm text-gray-400">
+                Chọn ngày, vị trí tỉnh thành và khung giờ phù hợp để giữ chỗ
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Scoped CSS cho thanh cuộn riêng biệt của Modal, không gây side-effect ra ngoài */}
+        <style>{`
+          .city-showtime-modal-scroll::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+          }
+          .city-showtime-modal-scroll::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .city-showtime-modal-scroll::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 9999px;
+          }
+          .city-showtime-modal-scroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(239, 68, 68, 0.6);
+          }
+          .city-showtime-modal-scroll {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+          }
+        `}</style>
+
+        {/* NỘI DUNG CUỘN ÊM ÁI BÊN TRONG: Không chạm mép viền bo tròn */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 pt-4 space-y-5 scroll-smooth city-showtime-modal-scroll">
+          {/* 2. Thanh Chọn Ngày: 30 ngày (2 Dòng x 15 ngày trải đều) */}
+          <div className="pb-4 border-b border-white/10">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-red-500" />
+                Chọn ngày chiếu:
+              </span>
+            </div>
+
+            <div className="space-y-2 w-full overflow-x-auto pb-1 city-showtime-modal-scroll">
+              {/* Dòng 1: 15 ngày đầu */}
+              <div 
+                className="grid gap-1.5 w-full min-w-[1100px] 2xl:min-w-full"
+                style={{ gridTemplateColumns: 'repeat(15, minmax(0, 1fr))' }}
+              >
+                {tier1Days.map((item) => {
+                  const isActive = selectedDate === item.dateStr;
+                  return (
+                    <button
+                      key={item.dateStr}
+                      onClick={() => setSelectedDate(item.dateStr)}
+                      className={`p-1.5 rounded-none transition-all duration-200 cursor-pointer flex items-center justify-between border ${
+                        isActive
+                          ? 'bg-gradient-to-r from-red-600 to-pink-600 text-white border-red-500 shadow-md shadow-red-600/30 font-bold'
+                          : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex flex-col text-left pl-0.5">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase leading-none">
+                          {item.month}
+                        </span>
+                        <span className={`text-[11px] font-semibold leading-none mt-1 ${isActive ? 'text-white' : 'text-gray-400'}`}>
+                          {item.dayOfWeek}
+                        </span>
+                      </div>
+                      <span className="text-base sm:text-lg font-black tracking-tight pr-0.5">
+                        {item.day}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Dòng 2: 15 ngày tiếp theo */}
+              <div 
+                className="grid gap-1.5 w-full min-w-[1100px] 2xl:min-w-full"
+                style={{ gridTemplateColumns: 'repeat(15, minmax(0, 1fr))' }}
+              >
+                {tier2Days.map((item) => {
+                  const isActive = selectedDate === item.dateStr;
+                  return (
+                    <button
+                      key={item.dateStr}
+                      onClick={() => setSelectedDate(item.dateStr)}
+                      className={`p-1.5 rounded-none transition-all duration-200 cursor-pointer flex items-center justify-between border ${
+                        isActive
+                          ? 'bg-gradient-to-r from-red-600 to-pink-600 text-white border-red-500 shadow-md shadow-red-600/30 font-bold'
+                          : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex flex-col text-left pl-0.5">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase leading-none">
+                          {item.month}
+                        </span>
+                        <span className={`text-[11px] font-semibold leading-none mt-1 ${isActive ? 'text-white' : 'text-gray-400'}`}>
+                          {item.dayOfWeek}
+                        </span>
+                      </div>
+                      <span className="text-base sm:text-lg font-black tracking-tight pr-0.5">
+                        {item.day}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+        {/* 3. Thanh Chọn Địa Điểm: 34 Tỉnh Thành */}
+        <div className="py-4 border-b border-white/10">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-red-500" />
+              Chọn Tỉnh / Thành Phố (34 Tỉnh Thành):
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1 city-showtime-modal-scroll">
+            {CITIES_LIST.map((city) => {
+              const isActive = selectedCity === city;
+              const hasShowtimes = citiesWithShowtimes.includes(city);
+
+              return (
+                <button
+                  key={city}
+                  onClick={() => setSelectedCity(city)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 cursor-pointer relative flex items-center gap-1.5 ${
+                    isActive
+                      ? 'bg-red-600 text-white shadow-md shadow-red-600/30 border border-red-500 font-bold scale-105 z-10'
+                      : hasShowtimes
+                      ? 'bg-white/10 text-white hover:bg-white/20 border border-white/20 font-semibold'
+                      : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300 border border-white/5 opacity-60'
+                  }`}
+                  title={hasShowtimes ? `${city} có rạp chiếu phim này` : `${city} chưa có suất chiếu`}
+                >
+                  {hasShowtimes && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  )}
+                  {city}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 4. Bộ lọc định dạng (2D Phụ Đề, 3D, IMAX...) */}
+        <div className="pt-4 pb-2 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-gray-400 mr-1">Định dạng:</span>
+          {['all', '2D', '3D', 'IMAX', 'GOLDCLASS'].map((fmt) => (
+            <button
+              key={fmt}
+              onClick={() => setSelectedFormat(fmt)}
+              className={`px-2.5 py-1 rounded-md text-xs transition-all ${
+                selectedFormat === fmt
+                  ? 'bg-white/20 text-white font-semibold border border-white/30'
+                  : 'bg-white/5 text-gray-400 hover:text-white border border-white/5'
+              }`}
+            >
+              {fmt === 'all' ? 'Tất cả' : fmt}
+            </button>
+          ))}
+        </div>
+
+        {/* 5. Danh Sách Rạp & Giờ Chiếu */}
+        <div className="mt-4 min-h-[160px]">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 text-red-500 animate-spin mb-2" />
+              <p className="text-xs text-gray-400">Đang tìm các suất chiếu phù hợp...</p>
+            </div>
+          ) : groupedCinemas.length > 0 ? (
+            <div className="space-y-5">
+              {groupedCinemas.map((cinema) => (
+                <div
+                  key={cinema.cinemaName}
+                  className="bg-black/40 rounded-2xl border border-white/10 p-4 sm:p-5 hover:border-red-500/30 transition-all"
+                >
+                  <div className="mb-3">
+                    <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                      <Film className="w-4 h-4 text-red-500" />
+                      {cinema.cinemaName}
+                    </h3>
+                    {cinema.address && (
+                      <p className="text-xs text-gray-400 mt-0.5">{cinema.address}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    {Object.entries(cinema.formats).map(([formatName, items]) => (
+                      <div key={formatName} className="border-t border-white/5 pt-2.5">
+                        <span className="text-xs font-semibold text-gray-300 block mb-2">
+                          {formatName}
+                        </span>
+
+                        <div className="flex flex-wrap gap-2.5">
+                          {items.map((st) => {
+                            const timeStr = new Date(st.startTime).toLocaleTimeString('vi-VN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            });
+                            return (
+                              <button
+                                key={st.id}
+                                onClick={() => handleSelectShowtime(st.id)}
+                                className="group px-4 py-2 bg-white/5 hover:bg-red-600/90 text-gray-200 hover:text-white border border-white/15 hover:border-red-500 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-1.5 shadow-sm hover:shadow-red-600/30 hover:scale-105 cursor-pointer"
+                                title={`Đặt vé: ${Number(st.basePrice).toLocaleString('vi-VN')} đ`}
+                              >
+                                <span>{timeStr}</span>
+                                <ChevronRight className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-black/20 rounded-2xl border border-white/5">
+              <Calendar className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+              <p className="text-sm font-semibold text-gray-300 mb-1">
+                Chưa có suất chiếu tại {selectedCity} cho ngày này
+              </p>
+              <p className="text-xs text-gray-500 max-w-md mx-auto">
+                Dady vui lòng chọn ngày khác trên thanh 30 ngày hoặc chọn các tỉnh thành lớn có nhiều cụm rạp như TP. Hồ Chí Minh, Hà Nội, Đà Nẵng.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+);
+};
+
+export default CityShowtimeModal;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\components\MovieCard.jsx
+================================================================================
+import React from 'react';
+import { Star, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import timeFormat from '../lib/timeFormat';
+
+const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
+    const navigate = useNavigate();
+
+    const handleCardClick = () => {
+        navigate('/movies/' + movie.id);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const formatReleaseDate = (date) => {
+        if (!date) return 'N/A';
+
+        const year = new Date(date).getFullYear();
+
+        return Number.isNaN(year) ? 'N/A' : year;
+    };
+
+    const formatDuration = (minutes) => {
+        if (!minutes) return 'N/A';
+
+        return timeFormat(minutes);
+    };
+
+    const genreNames = Array.isArray(movie.genres)
+        ? movie.genres
+            .slice(0, 2)
+            .map((genre) =>
+                typeof genre === 'string' ? genre : genre?.name
+            )
+            .filter(Boolean)
+            .join(' • ')
+        : '';
+
+    return (
+        <div
+            className={
+                `flex flex-col justify-between p-4 bg-gray-800 rounded-xl ` +
+                `hover:-translate-y-2 transition-all duration-300 shadow-xl ` +
+                `hover:shadow-2xl overflow-hidden group border border-gray-700/50 ` +
+                (viewMode === 'list' ? 'w-full' : 'w-64')
+            }
+        >
+            {/* Poster */}
+            <div
+                onClick={handleCardClick}
+                className="relative overflow-hidden rounded-lg cursor-pointer"
+            >
+                <img
+                    src={movie.posterUrl || movie.backdropUrl}
+                    alt={`${movie.title} poster`}
+                    loading="lazy"
+                    className="rounded-lg h-56 w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+
+                {/* Rating */}
+                {movie.ratingScore !== undefined && movie.ratingScore !== null && (
+                    <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 px-2 py-1 rounded-md text-sm">
+                        <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+
+                        <span className="text-white">
+                            {Number(movie.ratingScore).toFixed(1)}
+                        </span>
+                    </div>
+                )}
+            </div>
+
+            {/* Movie information */}
+            <div className="mt-4 flex-1">
+                <h3
+                    onClick={handleCardClick}
+                    className="text-white font-semibold text-lg truncate cursor-pointer hover:text-red-400 transition-colors"
+                    title={movie.title}
+                >
+                    {movie.title || 'Untitled'}
+                </h3>
+
+                {/* Genres */}
+                {genreNames && (
+                    <p className="text-gray-400 text-sm mt-1 truncate">
+                        {genreNames}
+                    </p>
+                )}
+
+                {/* Release year */}
+                <p className="text-gray-400 text-sm mt-2">
+                    Năm phát hành: {formatReleaseDate(movie.releaseDate)}
+                </p>
+
+                {/* Duration */}
+                <p className="text-gray-400 text-sm mt-1">
+                    Thời lượng: {formatDuration(movie.durationMin)}
+                </p>
+            </div>
+
+            {/* Actions */}
+            <div className="mt-4 flex items-center gap-2">
+                <button
+                    onClick={handleCardClick}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 px-3 rounded-lg transition-colors duration-200"
+                >
+                    Xem chi tiết
+                </button>
+
+                {onRemove && (
+                    <button
+                        onClick={() => onRemove(movie.id)}
+                        className="p-2 bg-gray-700 hover:bg-red-600 text-white rounded-lg transition-colors duration-200"
+                        title="Xóa phim"
+                    >
+                        <Trash2 className="w-5 h-5" />
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default MovieCard;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\components\MovieList.jsx
+================================================================================
+import React, { useRef } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import MovieCard from './MovieCard'; // Adjust path if needed
+
+// Sample movie data (expanded with more movies)
+const movies = [
+  {
+    id: 1,
+    title: "Inception",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/8ib2zML1zUr2slqQQVoUGQyWbbu.jpg",
+    release_date: "2010-07-16",
+    genres: [{ name: "Action" }, { name: "Sci-Fi" }],
+    runtime: 148,
+    vote_average: 8.8
+  },
+  {
+    id: 2,
+    title: "The Dark Knight",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg",
+    release_date: "2008-07-18",
+    genres: [{ name: "Action" }, { name: "Drama" }],
+    runtime: 152,
+    vote_average: 9.0
+  },
+  {
+    id: 3,
+    title: "Interstellar",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg",
+    release_date: "2014-11-07",
+    genres: [{ name: "Adventure" }, { name: "Sci-Fi" }],
+    runtime: 169,
+    vote_average: 8.6
+  },
+  {
+    id: 4,
+    title: "The Matrix",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+    release_date: "1999-03-31",
+    genres: [{ name: "Action" }, { name: "Sci-Fi" }],
+    runtime: 136,
+    vote_average: 8.7
+  },
+  {
+    id: 5,
+    title: "Fight Club",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg",
+    release_date: "1999-10-15",
+    genres: [{ name: "Drama" }, { name: "Thriller" }],
+    runtime: 139,
+    vote_average: 8.8
+  },
+  {
+    id: 6,
+    title: "Pulp Fiction",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/dM2wEO0y6KcO0lU14jq2BdMnzUt.jpg",
+    release_date: "1994-10-14",
+    genres: [{ name: "Crime" }, { name: "Thriller" }],
+    runtime: 154,
+    vote_average: 8.9
+  },
+  {
+    id: 7,
+    title: "Forrest Gump",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/saHP97rTPS5eLmrLQEcANmKrsFl.jpg",
+    release_date: "1994-07-06",
+    genres: [{ name: "Drama" }, { name: "Romance" }],
+    runtime: 142,
+    vote_average: 8.8
+  },
+  {
+    id: 8,
+    title: "The Shawshank Redemption",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/9O7gLzmreU0nGkIB6K3BsJbzvNv.jpg",
+    release_date: "1994-09-23",
+    genres: [{ name: "Drama" }, { name: "Crime" }],
+    runtime: 142,
+    vote_average: 9.3
+  },
+  {
+    id: 9,
+    title: "Gladiator",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/ty8TGRuvJLPUmARpH1q5i3FoebC.jpg",
+    release_date: "2000-05-05",
+    genres: [{ name: "Action" }, { name: "Drama" }],
+    runtime: 155,
+    vote_average: 8.5
+  },
+  {
+    id: 10,
+    title: "The Lord of the Rings: The Return of the King",
+    backdrop_path: "https://image.tmdb.org/t/p/w500/rCnzUzH6Pul2SCLrtu7wgRLowd.jpg",
+    release_date: "2003-12-17",
+    genres: [{ name: "Adventure" }, { name: "Fantasy" }],
+    runtime: 201,
+    vote_average: 8.9
+  }
+];
+
+const MovieList = () => {
+  const scrollRef = useRef(null);
+
+  const scroll = (direction) => {
+    if (scrollRef.current) {
+      const { current } = scrollRef;
+      const cardWidth = 272; // Approximate width of one card (w-64 + p-4 + margins)
+      const scrollAmount = cardWidth * 4; // Scroll by 4 cards at a time
+      const newScroll = direction === 'left' 
+        ? current.scrollLeft - scrollAmount 
+        : current.scrollLeft + scrollAmount;
+      
+      current.scrollTo({
+        left: newScroll,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  return (
+    <section className="py-8 bg-gray-900">
+      <div className="max-w-7xl mx-auto px-4">
+        <h2 className="text-2xl font-bold text-white mb-6">Phim Hot</h2>
+        <div className="relative">
+          {/* Left Button */}
+          <button 
+            onClick={() => scroll('left')}
+            className="absolute left-0 top-1/2 -translate-y-1/2 bg-gray-800/70 text-white p-2 rounded-full hover:bg-gray-800 transition z-10 shadow-md"
+            aria-label="Cuộn trái"
+          >
+            <ChevronLeft size={24} />
+          </button>
+
+          {/* Movie Cards Container */}
+          <div 
+            ref={scrollRef}
+            className="flex overflow-x-hidden space-x-4 snap-x snap-mandatory"
+            style={{ scrollSnapType: 'x mandatory' }} // For smooth snapping
+          >
+            {movies.map((movie) => (
+              <div key={movie.id} className="flex-shrink-0">
+                <MovieCard movie={movie} />
+              </div>
+            ))}
+          </div>
+
+          {/* Right Button */}
+          <button 
+            onClick={() => scroll('right')}
+            className="absolute right-0 top-1/2 -translate-y-1/2 bg-gray-800/70 text-white p-2 rounded-full hover:bg-gray-800 transition z-10 shadow-md"
+            aria-label="Cuộn phải"
+          >
+            <ChevronRight size={24} />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+export default MovieList;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\components\profile\BookingHistoryTab.jsx
+================================================================================
+import React from 'react';
+
+/**
+ * Component: BookingHistoryTab.jsx
+ * Người sở hữu: Dev D
+ * Trách nhiệm: Hiển thị danh sách vé đã đặt, trạng thái thanh toán, mã đặt vé và QR code vé điện tử
+ */
+const BookingHistoryTab = () => {
+  return (
+    <div className="bg-slate-800/60 p-6 rounded-xl border border-slate-700">
+      <h2 className="text-xl font-bold text-white mb-4">Lịch Sử Vé Đã Đặt (Dev D)</h2>
+      <div className="border border-dashed border-slate-600 rounded-lg p-8 text-center text-slate-400">
+        Danh sách vé điện tử đã đặt của người dùng (gọi API GET /api/bookings/my-bookings)
+      </div>
+    </div>
+  );
+};
+
+export default BookingHistoryTab;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\pages\admin\AdminMovies.jsx
+================================================================================
+import React from 'react';
+
+const AdminMovies = () => {
+  return (
+    <div className="min-h-screen bg-slate-900 text-white p-8">
+      <h1 className="text-3xl font-bold mb-2">Quản Lý Phim (Movies Management)</h1>
+      <p className="text-slate-400">Thêm, sửa, xóa phim và thể loại (Dev A - Sprint 3).</p>
+    </div>
+  );
+};
+
+export default AdminMovies;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\pages\admin\AdminShowtimes.jsx
+================================================================================
+import React from 'react';
+
+const AdminShowtimes = () => {
+  return (
+    <div className="min-h-screen bg-slate-900 text-white p-8">
+      <h1 className="text-3xl font-bold mb-2">Quản Lý Lịch Chiếu (Showtimes)</h1>
+      <p className="text-slate-400">Tạo suất chiếu, hủy suất chiếu và khởi tạo ghế động (Dev C - Sprint 3).</p>
+    </div>
+  );
+};
+
+export default AdminShowtimes;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\pages\MovieDetail.jsx
+================================================================================
+
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { dummyTrailers } from '../assets/assets';
+import { useMovies } from '../api';
+import {
+    Star,
+    Clock,
+    MapPin,
+    Ticket,
+    Play,
+    Loader2,
+    Heart,
+    ChevronLeft,
+    ChevronRight,
+    Calendar
+} from 'lucide-react';
+import BlurCircle from '../components/BlurCircle';
+import MovieCard from '../components/MovieCard';
+import CityShowtimeModal from '../components/booking/CityShowtimeModal';
+
+const FAVORITES_KEY = 'cinema_favorites';
+const FAVORITES_EVENT = 'cinema-favorites-updated';
+
+// Chuyển dữ liệu API về định dạng được giao diện sử dụng.
+const mapMovieDetail = (item) => {
+    if (!item) return null;
+
+    return {
+        ...item,
+        id: item.id ?? item._id,
+        _id: item._id ?? item.id,
+        poster_path: item.posterUrl || item.backdropUrl || '',
+        backdrop_path: item.backdropUrl || item.posterUrl || '',
+        release_date: item.releaseDate ?? item.release_date,
+        runtime: item.durationMin ?? item.runtime,
+        vote_average: item.ratingScore ?? item.vote_average,
+        vote_count: item.voteCount ?? item.vote_count ?? 0,
+        original_language: item.originalLanguage || item.original_language || 'vi',
+        genres: (Array.isArray(item.genres) ? item.genres : []).map(
+            (genre) =>
+                typeof genre === 'string'
+                    ? { name: genre }
+                    : genre
+        ),
+        casts: (Array.isArray(item.actors) ? item.actors : []).map(
+            (actor) => ({
+                id: actor.actorId ?? actor.id,
+                name: actor.name || 'Chưa cập nhật',
+                profile_path: actor.profilePath || actor.profile_path || '',
+                character: actor.characterName || actor.character || ''
+            })
+        )
+    };
+};
+
+// Đọc danh sách yêu thích an toàn.
+const readFavorites = () => {
+    try {
+        const stored = JSON.parse(
+            localStorage.getItem(FAVORITES_KEY) || '[]'
+        );
+
+        return Array.isArray(stored) ? stored : [];
+    } catch (error) {
+        console.error('Không thể đọc danh sách yêu thích:', error);
+        return [];
+    }
+};
+
+// So sánh ID dưới dạng chuỗi để tránh lệch kiểu number/string.
+const getMovieId = (item) => {
+    const id = item?._id ?? item?.id;
+    return id == null ? '' : String(id);
+};
+
+const MovieDetail = () => {
+    const { id } = useParams();
+    const navigate = useNavigate();
+
+    const [movie, setMovie] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [isFavorite, setIsFavorite] = useState(false);
+    const [relatedMovies, setRelatedMovies] = useState([]);
+    const [selectedDate, setSelectedDate] = useState(null);
+    const [availableDates, setAvailableDates] = useState([]);
+    const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+
+    // Tải chi tiết phim và danh sách phim liên quan.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadMovie = async () => {
+            setLoading(true);
+            setMovie(null);
+            setRelatedMovies([]);
+            setIsFavorite(false);
+
+            try {
+                const movieData = await useMovies.getMovieById(id);
+
+                if (cancelled) return;
+
+                const selectedMovie = mapMovieDetail(movieData);
+
+                if (!selectedMovie || !getMovieId(selectedMovie)) {
+                    setMovie(null);
+                    return;
+                }
+
+                setMovie(selectedMovie);
+
+                const favorites = readFavorites();
+                const selectedMovieId = getMovieId(selectedMovie);
+
+                setIsFavorite(
+                    favorites.some(
+                        (favorite) =>
+                            getMovieId(favorite) === selectedMovieId
+                    )
+                );
+
+                // Tải phim liên quan.
+                const moviesData = await useMovies.getAllMovies({
+                    page: 1,
+                    pageSize: 12
+                });
+
+                if (cancelled) return;
+
+                const rawItems = Array.isArray(moviesData)
+                    ? moviesData
+                    : Array.isArray(moviesData?.items)
+                        ? moviesData.items
+                        : [];
+
+                const items = rawItems
+                    .map(mapMovieDetail)
+                    .filter(Boolean);
+
+                setRelatedMovies(
+                    items
+                        .filter(
+                            (item) =>
+                                getMovieId(item) !== selectedMovieId
+                        )
+                        .slice(0, 4)
+                );
+
+                // Tạo danh sách 7 ngày kể từ hôm nay.
+                const dates = [];
+                const today = new Date();
+
+                for (let i = 0; i < 7; i++) {
+                    const date = new Date(today);
+                    date.setDate(today.getDate() + i);
+                    dates.push(date);
+                }
+
+                setAvailableDates(dates);
+                setSelectedDate(dates[0]);
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Lỗi khi tải chi tiết phim:', error);
+                    setMovie(null);
+                    setRelatedMovies([]);
+                }
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        loadMovie();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [id]);
+
+    // Đồng bộ trạng thái trái tim khi danh sách yêu thích thay đổi.
+    useEffect(() => {
+        if (!movie) return;
+
+        const syncFavorite = () => {
+            const movieId = getMovieId(movie);
+
+            setIsFavorite(
+                readFavorites().some(
+                    (favorite) => getMovieId(favorite) === movieId
+                )
+            );
+        };
+
+        window.addEventListener(FAVORITES_EVENT, syncFavorite);
+        window.addEventListener('storage', syncFavorite);
+
+        return () => {
+            window.removeEventListener(FAVORITES_EVENT, syncFavorite);
+            window.removeEventListener('storage', syncFavorite);
+        };
+    }, [movie]);
+
+    // Thêm hoặc bỏ phim yêu thích.
+    const toggleFavorite = () => {
+        if (!movie) return;
+
+        const favorites = readFavorites();
+        const movieId = getMovieId(movie);
+
+        if (!movieId) {
+            console.error('Không thể xác định ID của phim.');
+            return;
+        }
+
+        const alreadyFavorite = favorites.some(
+            (favorite) => getMovieId(favorite) === movieId
+        );
+
+        const newFavorites = alreadyFavorite
+            ? favorites.filter(
+                (favorite) => getMovieId(favorite) !== movieId
+            )
+            : [...favorites, movie];
+
+        try {
+            localStorage.setItem(
+                FAVORITES_KEY,
+                JSON.stringify(newFavorites)
+            );
+
+            setIsFavorite(!alreadyFavorite);
+
+            // Phát sự kiện SAU KHI đã lưu dữ liệu.
+            window.dispatchEvent(new Event(FAVORITES_EVENT));
+        } catch (error) {
+            console.error(
+                'Không thể lưu danh sách yêu thích:',
+                error
+            );
+        }
+    };
+
+    // Định dạng ngày bằng tiếng Việt.
+    const formatDateVietnamese = (date) => {
+        const days = [
+            'Chủ Nhật',
+            'Thứ Hai',
+            'Thứ Ba',
+            'Thứ Tư',
+            'Thứ Năm',
+            'Thứ Sáu',
+            'Thứ Bảy'
+        ];
+
+        const months = [
+            'Tháng 1',
+            'Tháng 2',
+            'Tháng 3',
+            'Tháng 4',
+            'Tháng 5',
+            'Tháng 6',
+            'Tháng 7',
+            'Tháng 8',
+            'Tháng 9',
+            'Tháng 10',
+            'Tháng 11',
+            'Tháng 12'
+        ];
+
+        const dayName = days[date.getDay()];
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        return {
+            dayName,
+            day: date.getDate(),
+            month: months[date.getMonth()],
+            shortDay:
+                dayName === 'Chủ Nhật'
+                    ? 'CN'
+                    : dayName.replace('Thứ ', 'T'),
+            isToday: date.toDateString() === new Date().toDateString(),
+            isTomorrow: date.toDateString() === tomorrow.toDateString()
+        };
+    };
+
+    // DỮ LIỆU MÔ PHỎNG: chưa lấy suất chiếu thực tế từ API.
+    // Kết quả còn chỗ/hết chỗ được giữ ổn định khi component render lại.
+    const getShowtimesForDate = (date) => {
+        if (!date) return [];
+
+        const times = ['10:00', '13:30', '16:00', '19:15', '22:00'];
+
+        return times.map((time, index) => ({
+            time,
+            id: `show_${date.getFullYear()}_${date.getMonth()}_${date.getDate()}_${index}`,
+            available: (date.getDate() + index) % 4 !== 0
+        }));
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
+                <div className="max-w-7xl mx-auto">
+                    <div className="flex items-center justify-center min-h-[60vh]">
+                        <div className="text-center">
+                            <Loader2 className="w-12 h-12 text-red-500 animate-spin mx-auto mb-4" />
+                            <h2 className="text-white text-xl font-semibold mb-2">
+                                Đang tải chi tiết phim...
+                            </h2>
+                            <p className="text-gray-400">
+                                Vui lòng chờ trong giây lát
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (!movie) {
+        return (
+            <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
+                <div className="max-w-7xl mx-auto text-center py-20">
+                    <h2 className="text-white text-2xl font-bold mb-4">
+                        Không tìm thấy phim
+                    </h2>
+                    <p className="text-gray-400 mb-6 max-w-md mx-auto">
+                        Không thể tải thông tin phim. Vui lòng thử lại
+                        hoặc quay lại danh sách phim.
+                    </p>
+                    <button
+                        onClick={() => navigate('/movies')}
+                        className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors duration-300"
+                    >
+                        Quay lại danh sách phim
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    const currentShowtimes = selectedDate
+        ? getShowtimesForDate(selectedDate)
+        : [];
+
+    const genresText = movie.genres
+        .map((genre) => genre?.name)
+        .filter(Boolean)
+        .join(', ');
+
+    return (
+        <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 pb-12">
+            <BlurCircle top="100px" left="0" />
+            <BlurCircle bottom="100px" right="0" />
+
+            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                {/* Thông tin phim */}
+                <div className="mb-12">
+                    <div className="flex flex-col lg:flex-row items-center gap-8">
+                        <img
+                            src={
+                                movie.backdrop_path ||
+                                'https://picsum.photos/400/600'
+                            }
+                            alt={`Poster phim ${movie.title || ''}`}
+                            className="w-full lg:w-1/3 rounded-xl shadow-2xl object-cover h-96"
+                            loading="lazy"
+                        />
+
+                        <div className="flex-1">
+                            <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-red-500 via-pink-500 to-purple-500 bg-clip-text text-transparent mb-4">
+                                {movie.title || 'Chưa có tên phim'}
+                            </h1>
+
+                            <div className="flex flex-wrap gap-4 text-gray-300 mb-6">
+                                <div className="flex items-center gap-2">
+                                    <Clock className="w-5 h-5 text-blue-500" />
+                                    <span>
+                                        {movie.release_date
+                                            ? `Năm ${new Date(movie.release_date).getFullYear()}`
+                                            : 'Chưa có năm phát hành'}
+                                    </span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <Star className="w-5 h-5 text-yellow-500" />
+                                    <span>
+                                        {Number.isFinite(Number(movie.vote_average))
+                                            ? Number(movie.vote_average).toFixed(1)
+                                            : 'Chưa có'}{' '}
+                                        điểm
+                                    </span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <MapPin className="w-5 h-5 text-green-500" />
+                                    <span>{genresText || 'Chưa phân loại'}</span>
+                                </div>
+                            </div>
+
+                            <p className="text-gray-400 text-lg leading-relaxed mb-6">
+                                {movie.overview ||
+                                    movie.description ||
+                                    'Chưa có mô tả chi tiết cho phim này.'}
+                            </p>
+
+                            <div className="flex flex-wrap gap-4">
+                                <button
+                                    onClick={() => setIsBookingModalOpen(true)}
+                                    className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2 cursor-pointer"
+                                >
+                                    <Ticket className="w-5 h-5" />
+                                    Đặt Vé Ngay
+                                </button>
+
+                                <button
+                                    onClick={() =>
+                                        navigate(`/movies/trailer/${movie._id}`)
+                                    }
+                                    className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-full shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2"
+                                >
+                                    <Play className="w-5 h-5" />
+                                    Xem Trailer
+                                </button>
+
+                                <button
+                                    onClick={toggleFavorite}
+                                    aria-pressed={isFavorite}
+                                    aria-label={
+                                        isFavorite
+                                            ? 'Bỏ phim khỏi danh sách yêu thích'
+                                            : 'Thêm phim vào danh sách yêu thích'
+                                    }
+                                    className={`px-6 py-3 ${isFavorite
+                                            ? 'bg-yellow-600 hover:bg-yellow-700'
+                                            : 'bg-white/10 hover:bg-white/20'
+                                        } text-white rounded-full shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2`}
+                                >
+                                    <Heart
+                                        className="w-5 h-5"
+                                        fill={isFavorite ? 'yellow' : 'none'}
+                                        stroke="white"
+                                    />
+                                    {isFavorite ? 'Bỏ yêu thích' : 'Yêu thích'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Chọn ngày và suất chiếu */}
+                <div className="bg-black/20 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-12">
+                    <div className="flex items-center gap-3 mb-6">
+                        <Calendar className="w-6 h-6 text-red-500" />
+                        <h2 className="text-2xl font-bold text-white">
+                            Chọn Ngày & Suất Chiếu
+                        </h2>
+                    </div>
+
+                    <div className="mb-8">
+                        <h3 className="text-lg font-semibold text-white mb-4">
+                            Chọn ngày:
+                        </h3>
+
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                aria-label="Ngày trước"
+                                disabled
+                                className="p-2 text-gray-500 cursor-not-allowed"
+                            >
+                                <ChevronLeft className="w-5 h-5" />
+                            </button>
+
+                            <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1">
+                                {availableDates.map((date, index) => {
+                                    const dateInfo = formatDateVietnamese(date);
+                                    const isSelected =
+                                        selectedDate &&
+                                        date.toDateString() ===
+                                        selectedDate.toDateString();
+
+                                    return (
+                                        <button
+                                            key={date.toISOString()}
+                                            onClick={() => setSelectedDate(date)}
+                                            className={`min-w-[100px] p-3 rounded-xl border transition-all duration-300 ${isSelected
+                                                    ? 'bg-red-500 border-red-500 text-white'
+                                                    : 'bg-black/30 border-white/20 text-gray-300 hover:bg-white/10 hover:border-white/30'
+                                                }`}
+                                        >
+                                            <div className="text-sm font-medium">
+                                                {dateInfo.isToday
+                                                    ? 'Hôm nay'
+                                                    : dateInfo.isTomorrow
+                                                        ? 'Ngày mai'
+                                                        : dateInfo.shortDay}
+                                            </div>
+                                            <div className="text-lg font-bold">
+                                                {dateInfo.day}
+                                            </div>
+                                            <div className="text-xs opacity-80">
+                                                {dateInfo.month}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <button
+                                type="button"
+                                aria-label="Ngày tiếp theo"
+                                disabled
+                                className="p-2 text-gray-500 cursor-not-allowed"
+                            >
+                                <ChevronRight className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {selectedDate && (
+                        <div>
+                            <h3 className="text-lg font-semibold text-white mb-4">
+                                Suất chiếu ngày{' '}
+                                {formatDateVietnamese(selectedDate).day}{' '}
+                                {formatDateVietnamese(selectedDate).month}:
+                            </h3>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                                {currentShowtimes.map((showtime) => (
+                                    <button
+                                        key={showtime.id}
+                                        onClick={() => {
+                                            if (showtime.available) {
+                                                navigate(
+                                                    `/movies/book/${movie._id}/${showtime.id}`,
+                                                    {
+                                                        state: {
+                                                            selectedDate,
+                                                            selectedTime: showtime.time
+                                                        }
+                                                    }
+                                                );
+                                            }
+                                        }}
+                                        disabled={!showtime.available}
+                                        className={`p-3 rounded-lg border transition-all duration-300 ${showtime.available
+                                                ? 'bg-green-500/20 border-green-500/50 text-green-300 hover:bg-green-500/30 hover:border-green-500'
+                                                : 'bg-gray-500/20 border-gray-500/50 text-gray-500 cursor-not-allowed'
+                                            }`}
+                                    >
+                                        <div className="font-semibold">
+                                            {showtime.time}
+                                        </div>
+                                        <div className="text-xs mt-1">
+                                            {showtime.available
+                                                ? 'Còn chỗ'
+                                                : 'Hết chỗ'}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="mt-4 p-4 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                                <p className="text-blue-300 text-sm">
+                                    💡 <strong>Lưu ý:</strong> Vui lòng có mặt
+                                    tại rạp ít nhất 15 phút trước giờ chiếu.
+                                    <strong> Suất chiếu hiện là dữ liệu mô phỏng</strong>,
+                                    chưa được lấy từ hệ thống đặt vé thực tế.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Thông tin chi tiết */}
+                <div className="bg-black/20 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-12">
+                    <h2 className="text-2xl font-bold text-white mb-4">
+                        Thông Tin Chi Tiết
+                    </h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-gray-300">
+                        <div>
+                            <p className="mb-2">
+                                <strong>Thời lượng:</strong>{' '}
+                                {movie.runtime || 'Chưa có'} phút
+                            </p>
+                            <p className="mb-2">
+                                <strong>Ngày khởi chiếu:</strong>{' '}
+                                {movie.release_date
+                                    ? new Date(movie.release_date).toLocaleDateString('vi-VN')
+                                    : 'Chưa có'}
+                            </p>
+                            <p className="mb-2">
+                                <strong>Slogan:</strong>{' '}
+                                {movie.tagline || 'Chưa có slogan'}
+                            </p>
+                        </div>
+
+                        <div>
+                            <p className="mb-2">
+                                <strong>Ngôn ngữ gốc:</strong>{' '}
+                                {(movie.original_language || 'vi').toUpperCase()}
+                            </p>
+                            <p className="mb-2">
+                                <strong>Lượt đánh giá:</strong>{' '}
+                                {Number(movie.vote_count || 0).toLocaleString('vi-VN')}{' '}
+                                lượt
+                            </p>
+                            <p className="mb-2">
+                                <strong>Độ tuổi:</strong>{' '}
+                                {movie.ageRating || 'Chưa xác định'}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Dàn diễn viên */}
+                <div className="mb-12">
+                    <h2 className="text-2xl font-bold text-white mb-6">
+                        Dàn Diễn Viên
+                    </h2>
+
+                    {movie.casts.length > 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4">
+                            {movie.casts.slice(0, 8).map((cast, index) => (
+                                <div
+                                    key={cast.id ?? index}
+                                    className="text-center group"
+                                >
+                                    <img
+                                        src={
+                                            cast.profile_path ||
+                                            'https://picsum.photos/200'
+                                        }
+                                        alt={cast.name}
+                                        className="w-24 h-24 object-cover rounded-full mx-auto mb-2 shadow-md group-hover:scale-110 transition-transform duration-300"
+                                        loading="lazy"
+                                    />
+                                    <p className="text-gray-300 text-sm font-medium">
+                                        {cast.name}
+                                    </p>
+                                    {cast.character && (
+                                        <p className="text-gray-500 text-xs mt-1">
+                                            {cast.character}
+                                        </p>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-gray-400">
+                            Chưa có thông tin dàn diễn viên.
+                        </p>
+                    )}
+                </div>
+
+                {/* Phim liên quan */}
+                <div className="mb-12">
+                    <div className="flex items-center justify-between mb-6">
+                        <h2 className="text-2xl font-bold text-white">
+                            Phim Bạn Có Thể Thích
+                        </h2>
+
+                        <button
+                            onClick={() => navigate('/movies')}
+                            className="text-gray-300 hover:text-white transition-colors flex items-center gap-2 text-sm"
+                        >
+                            Xem tất cả
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    {relatedMovies.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                            {relatedMovies.map((relatedMovie) => (
+                                <MovieCard
+                                    key={getMovieId(relatedMovie)}
+                                    movie={relatedMovie}
+                                />
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-gray-400">
+                            Chưa có phim liên quan để hiển thị.
+                        </p>
+                    )}
+                </div>
+
+                {/* Trailer */}
+                <div className="mb-12">
+                    <h2 className="text-2xl font-bold text-white mb-6">
+                        Trailer
+                    </h2>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        {dummyTrailers.map((trailer, index) => (
+                            <a
+                                key={index}
+                                href={trailer.videoUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="group"
+                            >
+                                <img
+                                    src={trailer.image}
+                                    alt={`Trailer ${index + 1} cho ${movie.title}`}
+                                    className="w-full h-48 object-cover rounded-xl shadow-md transition-transform group-hover:scale-105"
+                                    loading="lazy"
+                                />
+                                <p className="text-gray-300 text-sm mt-2 text-center">
+                                    Trailer {index + 1}
+                                </p>
+                            </a>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Modal đặt vé */}
+                <CityShowtimeModal
+                    isOpen={isBookingModalOpen}
+                    onClose={() => setIsBookingModalOpen(false)}
+                    movie={{
+                        id: movie.id || movie._id,
+                        title: movie.title,
+                        posterUrl:
+                            movie.poster_path ||
+                            'https://picsum.photos/400/600',
+                        durationMin: movie.runtime || 90,
+                        ageRating: movie.ageRating || 'P'
+                    }}
+                />
+            </div>
+        </div>
+    );
+};
+
+export default MovieDetail;
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\pages\Movies.jsx
+================================================================================
+
+import React, { useState, useEffect } from 'react';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
+import { useSearchParams } from 'react-router-dom';
+import MovieCard from '../components/MovieCard';
+import {
+    Search,
+    Grid3X3,
+    List,
+    Calendar,
+    Star,
+    Clock,
+    MapPin,
+    Loader2,
+    SlidersHorizontal,
+    X,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight
+} from 'lucide-react';
+import BlurCircle from '../components/BlurCircle';
+import { useMovies } from '../api';
+
+const mapMovie = (movie) => ({
+    ...movie,
+    _id: movie.id,
+    poster_path: movie.posterUrl || movie.backdropUrl,
+    backdrop_path: movie.backdropUrl || movie.posterUrl,
+    release_date: movie.releaseDate,
+    runtime: movie.durationMin,
+    vote_average: movie.ratingScore,
+    genre: movie.genres?.join(', ') || '',
+    genres: movie.genres?.map((name) => ({ name })) || []
+});
+
+const normalizeCity = (city) =>
+    (city || '').trim().toLocaleLowerCase('vi');
+
+const Movies = () => {
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    const searchParam = searchParams.get('search') || '';
+    const cityParam = searchParams.get('city') || '';
+    const cinemaIdParam = searchParams.get('cinemaId') || '';
+
+    const [movies, setMovies] = useState([]);
+    const [genres, setGenres] = useState([]);
+    const [cinemas, setCinemas] = useState([]);
+    const [cinemasLoaded, setCinemasLoaded] = useState(false);
+
+    const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState(searchParam);
+    const [selectedGenre, setSelectedGenre] = useState('all');
+    const [selectedCity, setSelectedCity] = useState(cityParam);
+    const [selectedCinemaId, setSelectedCinemaId] = useState(cinemaIdParam);
+
+    const [sortBy, setSortBy] = useState('latest');
+    const [viewMode, setViewMode] = useState('grid');
+    const [showFilters, setShowFilters] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalItems, setTotalItems] = useState(0);
+    const [refreshKey, setRefreshKey] = useState(0);
+
+    const pageSize = 12;
+    const filteredMovies = movies;
+
+    // Đồng bộ các bộ lọc từ URL khi mở trang hoặc URL thay đổi.
+    useEffect(() => {
+        setSearchQuery(searchParam);
+        setSelectedCity(cityParam);
+        setSelectedCinemaId(cinemaIdParam);
+        setCurrentPage(1);
+    }, [searchParam, cityParam, cinemaIdParam]);
+
+    // Tải danh sách rạp để tạo bộ lọc tỉnh/thành và cụm rạp.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCinemas = async () => {
+            try {
+                const response = await useMovies.getCinemas();
+
+                if (cancelled) return;
+
+                const list = Array.isArray(response)
+                    ? response
+                    : Array.isArray(response?.items)
+                        ? response.items
+                        : Array.isArray(response?.data)
+                            ? response.data
+                            : Array.isArray(response?.data?.items)
+                                ? response.data.items
+                                : [];
+
+                setCinemas(list);
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Lỗi khi tải danh sách rạp:', error);
+                    setCinemas([]);
+                }
+            } finally {
+                if (!cancelled) {
+                    setCinemasLoaded(true);
+                }
+            }
+        };
+
+        void loadCinemas();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Nếu URL chỉ có cinemaId, tự xác định thành phố của rạp đó.
+    // Chỉ xử lý sau khi đã tải xong danh sách rạp.
+    useEffect(() => {
+        if (!cinemasLoaded || !selectedCinemaId) return;
+
+        const cinema = cinemas.find(
+            (item) =>
+                String(item.id).toLowerCase() ===
+                String(selectedCinemaId).toLowerCase()
+        );
+
+        if (!cinema?.city) return;
+
+        const cinemaCity = cinema.city.trim();
+
+        if (
+            !selectedCity ||
+            normalizeCity(selectedCity) !== normalizeCity(cinemaCity)
+        ) {
+            setSelectedCity(cinemaCity);
+
+            setSearchParams(
+                (previous) => {
+                    const next = new URLSearchParams(previous);
+                    next.set('city', cinemaCity);
+                    next.set('cinemaId', String(cinema.id));
+                    return next;
+                },
+                { replace: true }
+            );
+        }
+    }, [
+        cinemasLoaded,
+        cinemas,
+        selectedCinemaId,
+        selectedCity,
+        setSearchParams
+    ]);
+
+    const cities = [
+        ...new Set(
+            cinemas
+                .map((cinema) => cinema.city?.trim())
+                .filter(Boolean)
+        )
+    ].sort((a, b) => a.localeCompare(b, 'vi'));
+
+    const filteredCinemas = cinemas.filter(
+        (cinema) =>
+            !selectedCity ||
+            normalizeCity(cinema.city) === normalizeCity(selectedCity)
+    );
+
+    // Tải danh sách phim theo các bộ lọc và phân trang.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadMovies = async () => {
+            setLoading(true);
+
+            try {
+                const response = await useMovies.getAllMovies({
+                    status: 'now_showing',
+                    search: searchQuery.trim() || undefined,
+                    genre: selectedGenre === 'all'
+                        ? undefined
+                        : selectedGenre,
+                    city: selectedCity || undefined,
+                    cinemaId: selectedCinemaId || undefined,
+                    sortBy,
+                    page: currentPage,
+                    pageSize
+                });
+
+                if (cancelled) return;
+
+                const items = Array.isArray(response)
+                    ? response
+                    : response?.items || [];
+
+                setMovies(items.map(mapMovie));
+                setTotalItems(response?.totalItems ?? items.length);
+                setTotalPages(
+                    Math.max(1, response?.totalPages ?? 1)
+                );
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Lỗi khi tải danh sách phim:', error);
+                    setMovies([]);
+                    setTotalItems(0);
+                    setTotalPages(1);
+                }
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        void loadMovies();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        searchQuery,
+        selectedGenre,
+        selectedCity,
+        selectedCinemaId,
+        sortBy,
+        currentPage,
+        refreshKey
+    ]);
+
+    // Tải danh sách thể loại từ API.
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadGenres = async () => {
+            try {
+                const response = await useMovies.getGenres();
+
+                if (cancelled) return;
+
+                const genreList = Array.isArray(response)
+                    ? response
+                    : response?.items || [];
+
+                setGenres(
+                    genreList
+                        .map((genre) =>
+                            typeof genre === 'string'
+                                ? genre
+                                : genre?.name
+                        )
+                        .filter(Boolean)
+                );
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Lỗi khi tải thể loại:', error);
+                }
+            }
+        };
+
+        void loadGenres();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Làm mới danh sách khi dữ liệu phim thay đổi qua SignalR.
+    useEffect(() => {
+        let cancelled = false;
+        let connection = null;
+
+        const connectSignalR = async () => {
+            const apiBaseUrl = (
+                import.meta.env.VITE_API_BASE_URL ||
+                'http://localhost:5000/api'
+            ).replace(/\/+$/, '');
+
+            const hubUrl =
+                apiBaseUrl.replace(/\/api$/i, '') + '/hubs/movies';
+
+            const newConnection = new HubConnectionBuilder()
+                .withUrl(hubUrl)
+                .withAutomaticReconnect()
+                .configureLogging(LogLevel.Warning)
+                .build();
+
+            connection = newConnection;
+
+            const refreshMovies = () => {
+                if (!cancelled) {
+                    setRefreshKey((value) => value + 1);
+                }
+            };
+
+            newConnection.on('MovieCreated', refreshMovies);
+            newConnection.on('MovieUpdated', refreshMovies);
+            newConnection.on('MovieDeleted', refreshMovies);
+            newConnection.onreconnected(refreshMovies);
+
+            try {
+                await newConnection.start();
+
+                if (cancelled) {
+                    await newConnection.stop();
+                    return;
+                }
+
+                console.info('SignalR đã kết nối:', hubUrl);
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Không thể kết nối SignalR:', error);
+                }
+            }
+        };
+
+        void connectSignalR();
+
+        return () => {
+            cancelled = true;
+
+            if (connection) {
+                void connection.stop().catch((error) => {
+                    console.error('Lỗi khi đóng kết nối SignalR:', error);
+                });
+            }
+        };
+    }, []);
+
+    const sortOptions = [
+        { value: 'latest', label: 'Mới nhất' },
+        { value: 'title', label: 'Tên phim A-Z' },
+        { value: 'rating', label: 'Đánh giá cao' }
+    ];
+
+    // Chọn thành phố sẽ xóa rạp đã chọn trước đó.
+    const handleCityChange = (city) => {
+        setSelectedCity(city);
+        setSelectedCinemaId('');
+        setCurrentPage(1);
+
+        setSearchParams((previous) => {
+            const next = new URLSearchParams(previous);
+
+            if (city) {
+                next.set('city', city);
+            } else {
+                next.delete('city');
+            }
+
+            next.delete('cinemaId');
+            next.delete('page');
+
+            return next;
+        });
+    };
+
+    // Chọn rạp sẽ đồng bộ cả city và cinemaId lên URL.
+    const handleCinemaChange = (cinemaId) => {
+        const cinema = cinemas.find(
+            (item) => String(item.id) === cinemaId
+        );
+
+        const city = cinema?.city?.trim() || selectedCity;
+
+        setSelectedCity(city);
+        setSelectedCinemaId(cinemaId);
+        setCurrentPage(1);
+
+        setSearchParams((previous) => {
+            const next = new URLSearchParams(previous);
+
+            if (city) {
+                next.set('city', city);
+            } else {
+                next.delete('city');
+            }
+
+            if (cinemaId) {
+                next.set('cinemaId', cinemaId);
+            } else {
+                next.delete('cinemaId');
+            }
+
+            next.delete('page');
+
+            return next;
+        });
+    };
+
+    const handleClearFilters = () => {
+        setSearchQuery('');
+        setSelectedGenre('all');
+        setSortBy('latest');
+        setSelectedCity('');
+        setSelectedCinemaId('');
+        setCurrentPage(1);
+
+        setSearchParams((previous) => {
+            const next = new URLSearchParams(previous);
+            next.delete('search');
+            next.delete('city');
+            next.delete('cinemaId');
+            next.delete('page');
+            return next;
+        });
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
+                <div className="max-w-7xl mx-auto">
+                    <div className="flex items-center justify-center min-h-[60vh]">
+                        <div className="text-center">
+                            <Loader2 className="w-12 h-12 text-red-500 animate-spin mx-auto mb-4" />
+
+                            <h2 className="text-white text-xl font-semibold mb-2">
+                                Đang tải danh sách phim...
+                            </h2>
+
+                            <p className="text-gray-400">
+                                Vui lòng chờ trong giây lát
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 pb-12">
+            <BlurCircle top="150px" left="0px" />
+            <BlurCircle bottom="50px" right="50px" />
+
+            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                {/* Header */}
+                <div className="text-center mb-12">
+                    <div className="inline-flex items-center gap-3 mb-4">
+                        <div className="w-12 h-12 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center">
+                            <Calendar className="w-6 h-6 text-white" />
+                        </div>
+
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-red-500 via-pink-500 to-purple-500 bg-clip-text text-transparent">
+                            Phim Đang Chiếu
+                        </h1>
+                    </div>
+
+                    <p className="text-gray-400 text-lg md:text-xl max-w-3xl mx-auto leading-relaxed">
+                        Khám phá những bộ phim mới nhất và hấp dẫn nhất đang được chiếu tại rạp
+                    </p>
+
+                    <div className="flex items-center justify-center gap-8 mt-8 text-sm">
+                        <div className="flex items-center gap-2 text-gray-300">
+                            <Star className="w-4 h-4 text-yellow-500" />
+                            <span>{totalItems} bộ phim</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-gray-300">
+                            <Clock className="w-4 h-4 text-blue-500" />
+                            <span>Cập nhật hàng ngày</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-gray-300">
+                            <MapPin className="w-4 h-4 text-green-500" />
+                            <span>
+                                {selectedCity || 'Toàn quốc'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Tìm kiếm và bộ lọc */}
+                <div className="bg-black/20 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-8">
+                    <div className="flex flex-col lg:flex-row gap-4 mb-4">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+
+                            <input
+                                type="text"
+                                placeholder="Tìm kiếm phim theo tên hoặc thể loại..."
+                                value={searchQuery}
+                                onChange={(event) => {
+                                    setSearchQuery(event.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="w-full pl-12 pr-12 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-red-500 focus:bg-white/10 transition-all duration-300"
+                            />
+
+                            {searchQuery && (
+                                <button
+                                    type="button"
+                                    aria-label="Xóa từ khóa tìm kiếm"
+                                    onClick={() => {
+                                        setSearchQuery('');
+                                        setCurrentPage(1);
+                                    }}
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            )}
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => setShowFilters(!showFilters)}
+                            className="lg:hidden flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors duration-300"
+                        >
+                            <SlidersHorizontal className="w-5 h-5" />
+                            Bộ lọc
+
+                            <ChevronDown
+                                className={showFilters ? "w-4 h-4 transition-transform duration-300 rotate-180" : "w-4 h-4 transition-transform duration-300"}
+                            />
+                        </button>
+                    </div>
+
+                    <div
+                        className={showFilters ? "lg:flex items-center gap-4 flex flex-col lg:flex-row" : "lg:flex items-center gap-4 hidden lg:flex"}
+                    >
+                        {/* Tỉnh/thành phố */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Khu vực (Tỉnh/Thành phố)
+                            </label>
+
+                            <select
+                                value={selectedCity}
+                                onChange={(event) =>
+                                    handleCityChange(event.target.value)
+                                }
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500"
+                            >
+                                <option value="" className="bg-gray-800">
+                                    Tất cả tỉnh/thành
+                                </option>
+
+                                {cities.map((city) => (
+                                    <option
+                                        key={city}
+                                        value={city}
+                                        className="bg-gray-800"
+                                    >
+                                        {city}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Cụm rạp */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Cụm rạp
+                            </label>
+
+                            <select
+                                value={selectedCinemaId}
+                                onChange={(event) =>
+                                    handleCinemaChange(event.target.value)
+                                }
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500"
+                            >
+                                <option value="" className="bg-gray-800">
+                                    Tất cả rạp trong khu vực
+                                </option>
+
+                                {filteredCinemas.map((cinema) => (
+                                    <option
+                                        key={cinema.id}
+                                        value={String(cinema.id)}
+                                        className="bg-gray-800"
+                                    >
+                                        {cinema.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Thể loại */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Thể loại
+                            </label>
+
+                            <select
+                                value={selectedGenre}
+                                onChange={(event) => {
+                                    setSelectedGenre(event.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500 transition-colors duration-300"
+                            >
+                                <option value="all" className="bg-gray-800">
+                                    Tất cả thể loại
+                                </option>
+
+                                {genres.map((genre) => (
+                                    <option
+                                        key={genre}
+                                        value={genre}
+                                        className="bg-gray-800 capitalize"
+                                    >
+                                        {genre}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Sắp xếp */}
+                        <div className="flex-1 min-w-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Sắp xếp theo
+                            </label>
+
+                            <select
+                                value={sortBy}
+                                onChange={(event) => {
+                                    setSortBy(event.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="w-full px-4 py-2 bg-white/10 border border-white/10 rounded-lg text-white focus:outline-none focus:border-red-500 transition-colors duration-300"
+                            >
+                                {sortOptions.map((option) => (
+                                    <option
+                                        key={option.value}
+                                        value={option.value}
+                                        className="bg-gray-800"
+                                    >
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Chế độ hiển thị */}
+                        <div className="flex-shrink-0">
+                            <label className="block text-gray-300 text-sm font-medium mb-2">
+                                Hiển thị
+                            </label>
+
+                            <div className="flex bg-white/5 rounded-lg p-1">
+                                <button
+                                    type="button"
+                                    aria-label="Hiển thị dạng lưới"
+                                    onClick={() => setViewMode('grid')}
+                                    className={viewMode === 'grid' ? "p-2 rounded transition-colors duration-300 bg-red-500 text-white" : "p-2 rounded transition-colors duration-300 text-gray-400 hover:text-white"}
+                                >
+                                    <Grid3X3 className="w-5 h-5" />
+                                </button>
+
+                                <button
+                                    type="button"
+                                    aria-label="Hiển thị dạng danh sách"
+                                    onClick={() => setViewMode('list')}
+                                    className={viewMode === 'list' ? "p-2 rounded transition-colors duration-300 bg-red-500 text-white" : "p-2 rounded transition-colors duration-300 text-gray-400 hover:text-white"}
+                                >
+                                    <List className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {(searchQuery ||
+                            selectedGenre !== 'all' ||
+                            sortBy !== 'latest' ||
+                            selectedCity ||
+                            selectedCinemaId) && (
+                            <button
+                                type="button"
+                                onClick={handleClearFilters}
+                                className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-white transition-colors duration-300"
+                            >
+                                <X className="w-4 h-4" />
+                                Xóa bộ lọc
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Kết quả */}
+                <div className="flex items-center justify-between mb-8">
+                    <div className="text-white">
+                        <h2 className="text-2xl font-bold mb-1">
+                            {searchQuery
+                                ? ('Kết quả tìm kiếm: "' + searchQuery + '"')
+                                : 'Tất cả phim'}
+                        </h2>
+
+                        <p className="text-gray-400">
+    Tìm thấy {totalItems} bộ phim
+    {selectedCity ? " tại " + selectedCity : ""}
+    {selectedCinemaId
+        ? " tại " + (cinemas.find((cinema) => String(cinema.id) === String(selectedCinemaId))?.name || "rạp đã chọn")
+        : ""}
+    {selectedGenre !== "all" ? " trong thể loại " + selectedGenre : ""}
+</p>
+                    </div>
+                </div>
+
+                {/* Danh sách phim */}
+                {filteredMovies.length > 0 ? (
+                    <div
+                        className={(viewMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
+                            : 'flex flex-col gap-4') + ' mb-12'}
+                    >
+                        {filteredMovies.map((movie) => (
+                            <div
+                                key={movie._id}
+                                className={
+                                    viewMode === 'list'
+                                        ? 'transform transition-all duration-300 hover:scale-[1.02]'
+                                        : ''
+                                }
+                            >
+                                <MovieCard
+                                    movie={movie}
+                                    viewMode={viewMode}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="text-center py-20">
+                        <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <Search className="w-12 h-12 text-gray-600" />
+                        </div>
+
+                        <h3 className="text-white text-2xl font-bold mb-4">
+                            Không tìm thấy phim nào
+                        </h3>
+
+                        <p className="text-gray-400 mb-8 max-w-md mx-auto">
+                            Không có phim nào phù hợp với tiêu chí tìm kiếm của bạn.
+                            Hãy thử điều chỉnh bộ lọc hoặc từ khóa tìm kiếm.
+                        </p>
+
+                        <button
+                            type="button"
+                            onClick={handleClearFilters}
+                            className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors duration-300"
+                        >
+                            Xóa tất cả bộ lọc
+                        </button>
+                    </div>
+                )}
+
+                {/* Phân trang */}
+                {totalPages > 1 && (
+                    <nav
+                        aria-label="Phân trang danh sách phim"
+                        className="flex flex-wrap items-center justify-center gap-2 mb-12"
+                    >
+                        <button
+                            type="button"
+                            aria-label="Trang trước"
+                            disabled={currentPage <= 1}
+                            onClick={() =>
+                                setCurrentPage((page) =>
+                                    Math.max(1, page - 1)
+                                )
+                            }
+                            className="p-3 rounded-lg border border-white/10 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10"
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+
+                        {Array.from(
+                            { length: totalPages },
+                            (_, index) => index + 1
+                        ).map((page) => (
+                            <button
+                                key={page}
+                                type="button"
+                                aria-current={
+                                    page === currentPage ? 'page' : undefined
+                                }
+                                onClick={() => setCurrentPage(page)}
+                                className={"min-w-11 px-4 py-2 rounded-lg border transition-colors " + (page === currentPage ? "bg-red-500 border-red-500 text-white" : "border-white/10 text-gray-300 hover:bg-white/10")}>
+                                {page}
+                            </button>
+                        ))}
+
+                        <button
+                            type="button"
+                            aria-label="Trang sau"
+                            disabled={currentPage >= totalPages}
+                            onClick={() =>
+                                setCurrentPage((page) =>
+                                    Math.min(totalPages, page + 1)
+                                )
+                            }
+                            className="p-3 rounded-lg border border-white/10 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10"
+                        >
+                            <ChevronRight className="w-5 h-5" />
+                        </button>
+                    </nav>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default Movies;
+
+
+
+
+
+
+================================================================================
+FILE: D:\File các môn học cntt\Nett\Cinema-Booking\Frontend\src\pages\MyBooking.jsx
+================================================================================
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { dummyBookingData, dummyShowsData } from '../assets/assets';
+import { Ticket, Clock, MapPin, CreditCard, Star, Trash2, Eye, CheckCircle, XCircle, AlertCircle, Calendar, Search, Filter } from 'lucide-react';
+import BlurCircle from '../components/BlurCircle';
+import timeFormat from '../lib/timeFormat';
+
+const MyBooking = () => {
+  const navigate = useNavigate();
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'paid', 'unpaid', 'cancelled'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('date_desc'); // 'date_asc', 'date_desc', 'price_asc', 'price_desc'
+  const [currentPage, setCurrentPage] = useState(1);
+  const bookingsPerPage = 5;
+
+  // Simulate fetching bookings for the current user
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      // Filter dummyBookingData for the current user (assuming user is "GreatStack" for demo)
+      const userBookings = dummyBookingData.filter(booking => booking.user.name === "GreatStack");
+      
+      // Enhance bookings with movie details and add status (for demo, add random statuses)
+      const enhancedBookings = userBookings.map((booking, index) => {
+        const movie = dummyShowsData.find(m => m._id === booking.show.movie._id);
+        const status = index % 3 === 0 ? 'cancelled' : booking.isPaid ? 'paid' : 'unpaid';
+        const canCancel = !booking.isPaid && new Date(booking.show.showDateTime) > new Date(); // Can cancel if unpaid and future date
+        const canRate = booking.isPaid && new Date(booking.show.showDateTime) < new Date(); // Can rate if paid and past date
+        return { ...booking, movie, status, canCancel, canRate };
+      });
+      
+      setBookings(enhancedBookings);
+      setLoading(false);
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Filter and sort bookings
+  const getFilteredBookings = () => {
+    let filtered = bookings;
+
+    // Filter by status
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(b => b.status === filterStatus);
+    }
+
+    // Search by movie title or seats
+    if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
+      filtered = filtered.filter(b => 
+        b.movie.title.toLowerCase().includes(lowerQuery) ||
+        b.bookedSeats.join(', ').toLowerCase().includes(lowerQuery)
+      );
+    }
+
+    // Sort
+    filtered = [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case 'date_asc':
+          return new Date(a.show.showDateTime) - new Date(b.show.showDateTime);
+        case 'date_desc':
+          return new Date(b.show.showDateTime) - new Date(a.show.showDateTime);
+        case 'price_asc':
+          return a.amount - b.amount;
+        case 'price_desc':
+          return b.amount - a.amount;
+        default:
+          return 0;
+      }
+    });
+
+    return filtered;
+  };
+
+  const filteredBookings = getFilteredBookings();
+  const totalPages = Math.ceil(filteredBookings.length / bookingsPerPage);
+  const paginatedBookings = filteredBookings.slice(
+    (currentPage - 1) * bookingsPerPage,
+    currentPage * bookingsPerPage
+  );
+
+  // Handle cancel booking
+  const handleCancel = (bookingId) => {
+    if (window.confirm('Bạn có chắc muốn hủy vé này?')) {
+      setBookings(prev => prev.map(b => 
+        b._id === bookingId ? { ...b, status: 'cancelled', canCancel: false } : b
+      ));
+    }
+  };
+
+  // Handle rate movie (simulate)
+  const handleRate = (movieId) => {
+    alert(`Đánh giá phim ${movieId}. Chức năng này sẽ mở modal đánh giá sao và bình luận.`);
+  };
+
+  // Handle view details
+  const handleViewDetails = (bookingId) => {
+    alert(`Xem chi tiết booking ${bookingId}. Có thể navigate đến trang chi tiết.`);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto mb-4"></div>
+            <h2 className="text-white text-xl font-semibold">Đang tải lịch sử đặt vé...</h2>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 pb-12">
+      <BlurCircle top="100px" left="0" />
+      <BlurCircle bottom="100px" right="0" />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+          <h1 className="text-3xl font-bold text-white">Lịch Sử Đặt Vé</h1>
+          <div className="flex flex-wrap gap-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Tìm phim hoặc ghế..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2 bg-white/10 border border-white/20 rounded-full text-white placeholder-gray-400 focus:outline-none focus:border-red-500 transition-colors"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Filter className="w-5 h-5 text-gray-400" />
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="bg-white/10 border border-white/20 rounded-full px-4 py-2 text-white focus:outline-none focus:border-red-500 transition-colors"
+              >
+                <option value="all">Tất cả</option>
+                <option value="paid">Đã thanh toán</option>
+                <option value="unpaid">Chưa thanh toán</option>
+                <option value="cancelled">Đã hủy</option>
+              </select>
+            </div>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="bg-white/10 border border-white/20 rounded-full px-4 py-2 text-white focus:outline-none focus:border-red-500 transition-colors"
+            >
+              <option value="date_desc">Mới nhất</option>
+              <option value="date_asc">Cũ nhất</option>
+              <option value="price_desc">Giá cao nhất</option>
+              <option value="price_asc">Giá thấp nhất</option>
+            </select>
+          </div>
+        </div>
+
+        {paginatedBookings.length === 0 ? (
+          <div className="bg-black/20 rounded-2xl border border-white/10 p-12 text-center">
+            <Ticket className="w-16 h-16 text-gray-500 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-white mb-2">Chưa có đặt vé nào</h2>
+            <p className="text-gray-400 mb-6">Hãy bắt đầu đặt vé cho bộ phim yêu thích của bạn!</p>
+            <button
+              onClick={() => navigate('/movies')}
+              className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors"
+            >
+              Khám phá phim
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {paginatedBookings.map((booking) => (
+              <div key={booking._id} className="bg-black/20 backdrop-blur-sm rounded-2xl border border-white/10 p-6">
+                <div className="flex flex-col md:flex-row gap-6">
+                  <img
+                    src={booking.movie.poster_path}
+                    alt={booking.movie.title}
+                    className="w-full md:w-32 h-48 object-cover rounded-lg shadow-md"
+                  />
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-xl font-bold text-white">{booking.movie.title}</h3>
+                      <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        booking.status === 'paid' ? 'bg-green-500/20 text-green-300' :
+                        booking.status === 'unpaid' ? 'bg-yellow-500/20 text-yellow-300' :
+                        'bg-red-500/20 text-red-300'
+                      }`}>
+                        {booking.status === 'paid' ? 'Đã thanh toán' :
+                         booking.status === 'unpaid' ? 'Chưa thanh toán' : 'Đã hủy'}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-gray-300 mb-6">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-5 h-5 text-blue-500" />
+                        <span>{new Date(booking.show.showDateTime).toLocaleDateString('vi-VN')}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-5 h-5 text-blue-500" />
+                        <span>{new Date(booking.show.showDateTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-5 h-5 text-green-500" />
+                        <span>Rạp XYZ - Phòng 1</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Ticket className="w-5 h-5 text-purple-500" />
+                        <span>Ghế: {booking.bookedSeats.join(', ')}</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <div className="text-lg font-bold text-red-500">
+                        Tổng: {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(booking.amount)}
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => handleViewDetails(booking._id)}
+                          className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+                          title="Xem chi tiết"
+                        >
+                          <Eye className="w-5 h-5" />
+                        </button>
+                        {booking.canCancel && (
+                          <button
+                            onClick={() => handleCancel(booking._id)}
+                            className="p-2 bg-red-500/20 hover:bg-red-500/30 rounded-full text-red-300 transition-colors"
+                            title="Hủy vé"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        )}
+                        {booking.canRate && (
+                          <button
+                            onClick={() => handleRate(booking.movie._id)}
+                            className="p-2 bg-yellow-500/20 hover:bg-yellow-500/30 rounded-full text-yellow-300 transition-colors"
+                            title="Đánh giá"
+                          >
+                            <Star className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex justify-center gap-2 mt-8">
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => setCurrentPage(i + 1)}
+                className={`px-4 py-2 rounded-full transition-colors ${
+                  currentPage === i + 1 ? 'bg-red-500 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                }`}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default MyBooking;

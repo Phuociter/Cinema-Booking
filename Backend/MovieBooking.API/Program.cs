@@ -11,7 +11,7 @@ using MovieBooking.Data.Repositories.Interfaces;
 using MovieBooking.Service.Interfaces;
 using MovieBooking.Service.Mappings;
 using MovieBooking.Service.Services;
-
+using MovieBooking.API.Hubs;
 var builder = WebApplication.CreateBuilder(args);
 
 // Tự động nạp biến môi trường từ file .env nếu có
@@ -19,6 +19,7 @@ LoadDotEnv(builder);
 
 // 1. Add Controllers & Swagger with JWT Bearer
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -54,7 +55,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
     ?? "Host=localhost;Port=5432;Database=cinema_db;Username=postgres;Password=postgres";
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connectionString).UseSnakeCaseNamingConvention());
+options.UseNpgsql(connectionString));
 
 // 3. Register AutoMapper
 builder.Services.AddAutoMapper(cfg => cfg.AddProfile<MappingProfile>());
@@ -199,7 +200,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
+app.MapHub<MovieHub>("/hubs/movies");
 app.Run();
 
 static string[] ResolveAllowedOrigins(IConfiguration configuration)
