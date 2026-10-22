@@ -68,13 +68,13 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Đơn đặt vé đã hết hạn thanh toán (quá 10 phút)." });
         }
 
-        // Đọc cấu hình MoMo
-        var partnerCode = _configuration["MOMO_PARTNER_CODE"] ?? "MOMOBKUN20180529";
-        var accessKey = _configuration["MOMO_ACCESS_KEY"] ?? "klm05TvNBzhg7h7j";
-        var secretKey = _configuration["MOMO_SECRET_KEY"] ?? "at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa";
-        var apiEndpoint = _configuration["MOMO_API_ENDPOINT"] ?? "https://test-payment.momo.vn";
-        var returnUrl = _configuration["MOMO_RETURN_URL"] ?? "http://localhost:3001/payment/callback";
-        var notifyUrl = _configuration["MOMO_NOTIFY_URL"] ?? "https://test-payment.momo.vn";
+        // Đọc cấu hình MoMo từ biến môi trường (.env)
+        var momo = GetMoMoConfig();
+        if (momo == null)
+        {
+            _logger.LogError("Thiếu cấu hình biến môi trường MoMo (MOMO_PARTNER_CODE, MOMO_ACCESS_KEY, MOMO_SECRET_KEY).");
+            return StatusCode(500, new { message = "Hệ thống chưa được cấu hình biến môi trường MoMo." });
+        }
 
         var orderId = $"BK_{booking.BookingCode}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
         var requestId = Guid.NewGuid().ToString();
@@ -85,15 +85,15 @@ public class PaymentsController : ControllerBase
 
         // Raw signature alphabetical order:
         // accessKey, amount, extraData, ipnUrl, orderId, orderInfo, partnerCode, redirectUrl, requestId, requestType
-        var rawSignature = $"accessKey={accessKey}&amount={amount}&extraData={extraData}&ipnUrl={notifyUrl}&orderId={orderId}&orderInfo={orderInfo}&partnerCode={partnerCode}&redirectUrl={returnUrl}&requestId={requestId}&requestType={requestType}";
-        var signature = ComputeHmacSha256(rawSignature, secretKey);
+        var rawSignature = $"accessKey={momo.AccessKey}&amount={amount}&extraData={extraData}&ipnUrl={momo.NotifyUrl}&orderId={orderId}&orderInfo={orderInfo}&partnerCode={momo.PartnerCode}&redirectUrl={momo.ReturnUrl}&requestId={requestId}&requestType={requestType}";
+        var signature = ComputeHmacSha256(rawSignature, momo.SecretKey);
 
         var momoRequestPayload = new
         {
-            partnerCode,
+            partnerCode = momo.PartnerCode,
             requestType,
-            ipnUrl = notifyUrl,
-            redirectUrl = returnUrl,
+            ipnUrl = momo.NotifyUrl,
+            redirectUrl = momo.ReturnUrl,
             orderId,
             amount,
             orderInfo,
@@ -107,7 +107,7 @@ public class PaymentsController : ControllerBase
          client.Timeout = TimeSpan.FromSeconds(30);
 
          var jsonContent = new StringContent(JsonSerializer.Serialize(momoRequestPayload), Encoding.UTF8, "application/json");
-         var baseEndpoint = (_configuration["MOMO_API_ENDPOINT"] ?? "https://test-payment.momo.vn")
+         var baseEndpoint = momo.ApiEndpoint
              .Replace("/v2/gateway/api/create", "")
              .Replace("/v2/gateway/api/query", "")
              .TrimEnd('/');
@@ -268,23 +268,25 @@ public class PaymentsController : ControllerBase
             });
         }
 
-        // Gọi MoMo Query Transaction Status API
-        var partnerCode = _configuration["MOMO_PARTNER_CODE"] ?? "MOMOBKUN20180529";
-        var accessKey = _configuration["MOMO_ACCESS_KEY"] ?? "klm05TvNBzhg7h7j";
-        var secretKey = _configuration["MOMO_SECRET_KEY"] ?? "at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa";
-        var apiEndpoint = _configuration["MOMO_API_ENDPOINT"] ?? "https://test-payment.momo.vn";
+        // Gọi MoMo Query Transaction Status API từ biến môi trường (.env)
+        var momo = GetMoMoConfig();
+        if (momo == null)
+        {
+            _logger.LogError("Thiếu cấu hình biến môi trường MoMo (MOMO_PARTNER_CODE, MOMO_ACCESS_KEY, MOMO_SECRET_KEY).");
+            return StatusCode(500, new { message = "Hệ thống chưa được cấu hình biến môi trường MoMo." });
+        }
 
         var orderId = payment.TransactionRef;
         var requestId = Guid.NewGuid().ToString();
 
         // Raw signature alphabetical order:
         // accessKey, orderId, partnerCode, requestId
-        var rawSignature = $"accessKey={accessKey}&orderId={orderId}&partnerCode={partnerCode}&requestId={requestId}";
-        var signature = ComputeHmacSha256(rawSignature, secretKey);
+        var rawSignature = $"accessKey={momo.AccessKey}&orderId={orderId}&partnerCode={momo.PartnerCode}&requestId={requestId}";
+        var signature = ComputeHmacSha256(rawSignature, momo.SecretKey);
 
         var momoQueryPayload = new
         {
-            partnerCode,
+            partnerCode = momo.PartnerCode,
             requestId,
             orderId,
             signature,
@@ -295,7 +297,7 @@ public class PaymentsController : ControllerBase
         client.Timeout = TimeSpan.FromSeconds(30);
 
         var jsonContent = new StringContent(JsonSerializer.Serialize(momoQueryPayload), Encoding.UTF8, "application/json");
-        var baseEndpoint = (_configuration["MOMO_API_ENDPOINT"] ?? "https://test-payment.momo.vn")
+        var baseEndpoint = momo.ApiEndpoint
             .Replace("/v2/gateway/api/create", "")
             .Replace("/v2/gateway/api/query", "")
             .TrimEnd('/');
@@ -444,5 +446,33 @@ public class PaymentsController : ControllerBase
             return true;
         }
         return false;
+    }
+
+    private record MoMoConfig(string PartnerCode, string AccessKey, string SecretKey, string ApiEndpoint, string ReturnUrl, string NotifyUrl);
+
+    private MoMoConfig? GetMoMoConfig()
+    {
+        var partnerCode = _configuration["MOMO_PARTNER_CODE"] ?? Environment.GetEnvironmentVariable("MOMO_PARTNER_CODE");
+        var accessKey = _configuration["MOMO_ACCESS_KEY"] ?? Environment.GetEnvironmentVariable("MOMO_ACCESS_KEY");
+        var secretKey = _configuration["MOMO_SECRET_KEY"] ?? Environment.GetEnvironmentVariable("MOMO_SECRET_KEY");
+
+        if (string.IsNullOrWhiteSpace(partnerCode) || string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey))
+        {
+            return null;
+        }
+
+        var apiEndpoint = _configuration["MOMO_API_ENDPOINT"] 
+            ?? Environment.GetEnvironmentVariable("MOMO_API_ENDPOINT") 
+            ?? "https://test-payment.momo.vn";
+
+        var returnUrl = _configuration["MOMO_RETURN_URL"] 
+            ?? Environment.GetEnvironmentVariable("MOMO_RETURN_URL") 
+            ?? "http://localhost:3001/payment/callback";
+
+        var notifyUrl = _configuration["MOMO_NOTIFY_URL"] 
+            ?? Environment.GetEnvironmentVariable("MOMO_NOTIFY_URL") 
+            ?? "https://test-payment.momo.vn";
+
+        return new MoMoConfig(partnerCode, accessKey, secretKey, apiEndpoint, returnUrl, notifyUrl);
     }
 }

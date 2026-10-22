@@ -26,7 +26,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import BlurCircle from '../components/BlurCircle';
 import { useConfirm } from '../components/ConfirmModal';
 
-const MyBooking = () => {
+const MyBooking = ({ embedded = false }) => {
   const navigate = useNavigate();
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -169,22 +169,34 @@ const MyBooking = () => {
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white pt-24 pb-16 px-4 sm:px-6 relative overflow-hidden">
-      <BlurCircle top="80px" left="-50px" />
-      <BlurCircle bottom="100px" right="-50px" />
+    <div className={embedded ? "text-white" : "min-h-screen bg-slate-950 text-white pt-24 pb-16 px-4 sm:px-6 relative overflow-hidden"}>
+      {!embedded && (
+        <>
+          <BlurCircle top="80px" left="-50px" />
+          <BlurCircle bottom="100px" right="-50px" />
+        </>
+      )}
 
-      <div className="max-w-7xl mx-auto relative z-10">
+      <div className={embedded ? "relative z-10" : "max-w-7xl mx-auto relative z-10"}>
         {/* Header & Controls */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 border-b border-white/10 pb-6">
-          <div>
-            <div className="flex items-center gap-2 text-red-500 font-semibold text-sm uppercase tracking-wider mb-1">
-              <Ticket className="w-4 h-4" /> Tài khoản của tôi
+          {!embedded ? (
+            <div>
+              <div className="flex items-center gap-2 text-red-500 font-semibold text-sm uppercase tracking-wider mb-1">
+                <Ticket className="w-4 h-4" /> Tài khoản của tôi
+              </div>
+              <h1 className="text-3xl font-extrabold text-white">Lịch Sử Đặt Vé</h1>
+              <p className="text-slate-400 text-sm mt-1">
+                Xem lại danh sách vé đã đặt và mã QR điện tử để vào rạp chiếu phim
+              </p>
             </div>
-            <h1 className="text-3xl font-extrabold text-white">Lịch Sử Đặt Vé</h1>
-            <p className="text-slate-400 text-sm mt-1">
-              Xem lại danh sách vé đã đặt và mã QR điện tử để vào rạp chiếu phim
-            </p>
-          </div>
+          ) : (
+            <div>
+              <p className="text-slate-400 text-sm">
+                Danh sách vé điện tử đã đặt của bạn kèm mã QR và trạng thái thanh toán
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
             {/* Search Box */}

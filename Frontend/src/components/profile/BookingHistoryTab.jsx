@@ -13,7 +13,7 @@ const BookingHistoryTab = () => {
 
             {/* Thay thế khung viền nét đứt cũ bằng Component thực tế */}
             <div className="mt-4">
-                <MyBooking />
+                <MyBooking embedded={true} />
             </div>
         </div>
     );
