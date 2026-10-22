@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import BlurCircle from '../components/BlurCircle';
 import { axiosInstance } from '../api';
+import { useCinemas } from '../api/useCinemas';
 
 const mapMovie = (movie) => ({
   ...movie,
@@ -31,7 +32,11 @@ const mapMovie = (movie) => ({
 });
 
 const Movies = () => {
-  const [searchParams] = useSearchParams();
+  // ---- Bộ lọc URL params: ?search=... & ?city=...&cinemaId=... ----
+  const [searchParams, setSearchParams] = useSearchParams();
+  const cinemaId = searchParams.get('cinemaId') || '';
+  const cityParam = searchParams.get('city') || '';
+
   const [movies, setMovies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
@@ -40,6 +45,13 @@ const Movies = () => {
   const [viewMode, setViewMode] = useState('grid');
   const [showFilters, setShowFilters] = useState(false);
   const [filteredMovies, setFilteredMovies] = useState([]);
+
+  const [cinemaInfo, setCinemaInfo] = useState(null);
+  // null = không lọc theo rạp
+  const [cinemaFilter, setCinemaFilter] = useState(null);
+  const [cinemaError, setCinemaError] = useState('');
+
+  const handleClearCinemaFilter = () => setSearchParams({});
 
   useEffect(() => {
     const s = searchParams.get('search');
@@ -71,9 +83,72 @@ const Movies = () => {
     }
   }, [movies]);
 
+  // Khi URL có cinemaId: lấy thông tin rạp + các phim đang có suất chiếu tại rạp đó
+  useEffect(() => {
+    if (!cinemaId) {
+      setCinemaInfo(null);
+      setCinemaFilter(null);
+      setCinemaError('');
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadCinemaFilter = async () => {
+      try {
+        setCinemaError('');
+
+        // Rạp đã xóa mềm sẽ trả 404 -> nhảy vào catch
+        const cinema = await useCinemas.getCinemaById(cinemaId);
+
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+        const movieIds = new Set();
+        const movieTitles = new Set();
+        const pageSize = 100;
+
+        for (let page = 1; page <= 10; page++) {
+          const data = await axiosInstance.get('/showtimes', {
+            params: { cinemaId, dateFrom: today, page, pageSize }
+          });
+          const items = data?.items || [];
+
+          items.forEach((st) => {
+            if (st.movieId) movieIds.add(st.movieId);
+            if (st.movieTitle) movieTitles.add(st.movieTitle);
+          });
+
+          if (items.length < pageSize) break;
+        }
+
+        if (cancelled) return;
+        setCinemaInfo(cinema);
+        setCinemaFilter({ movieIds, movieTitles });
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Lỗi khi tải bộ lọc rạp:', error);
+        setCinemaInfo(null);
+        setCinemaFilter(null);
+        setCinemaError('Không tìm thấy rạp này hoặc rạp đã ngừng hoạt động.');
+      }
+    };
+
+    loadCinemaFilter();
+    return () => { cancelled = true; };
+  }, [cinemaId]);
+
   // Filter and search movies
   useEffect(() => {
     let result = [...movies];
+
+    // Cinema filter (từ URL ?cinemaId=...)
+    if (cinemaFilter) {
+      result = result.filter((movie) =>
+        cinemaFilter.movieIds.has(movie.id) ||
+        cinemaFilter.movieTitles.has(movie.title)
+      );
+    }
 
     // Search filter
     if (searchQuery) {
@@ -105,7 +180,7 @@ const Movies = () => {
     }
 
     setFilteredMovies(result);
-  }, [movies, searchQuery, selectedGenre, sortBy]);
+  }, [movies, searchQuery, selectedGenre, sortBy, cinemaFilter]);
 
   // Get unique individual genres
   const genres = [
@@ -178,6 +253,32 @@ const Movies = () => {
             </div>
           </div>
         </div>
+
+        {/* Banner lọc theo rạp */}
+        {(cinemaId || cinemaError) && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-5 py-4">
+            <div className="flex items-center gap-2 text-sm text-gray-200">
+              <MapPin className="h-4 w-4 text-green-500" />
+              {cinemaError ? (
+                <span className="text-red-400">{cinemaError}</span>
+              ) : cinemaInfo ? (
+                <span>
+                  Đang lọc theo rạp: <b>{cinemaInfo.name}</b>
+                  {(cinemaInfo.city || cityParam) && ` (${cinemaInfo.city || cityParam})`}
+                </span>
+              ) : (
+                <span>Đang tải thông tin rạp...</span>
+              )}
+            </div>
+            <button
+              onClick={handleClearCinemaFilter}
+              className="flex items-center gap-1 text-sm text-gray-400 transition-colors hover:text-white"
+            >
+              <X className="h-4 w-4" />
+              Bỏ lọc rạp
+            </button>
+          </div>
+        )}
 
         {/* Filters & Search */}
         <div className="bg-black/20 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-8">

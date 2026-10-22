@@ -45,6 +45,11 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<SeatType>().ToTable("seattypes");
         modelBuilder.Entity<BookingSnack>().ToTable("bookingsnacks");
 
+        modelBuilder.Entity<SeatType>().ToTable("seattypes");
+        modelBuilder.Entity<ShowtimeSeat>().ToTable("showtimeseats");
+        modelBuilder.Entity<CinemaSnack>().ToTable("cinemasnacks");
+        modelBuilder.Entity<BookingSnack>().ToTable("bookingsnacks");
+
         // Composite Keys
         modelBuilder.Entity<MovieGenre>().HasKey(x => new { x.MovieId, x.GenreId });
         modelBuilder.Entity<MovieDirector>().HasKey(x => new { x.MovieId, x.DirectorId });
