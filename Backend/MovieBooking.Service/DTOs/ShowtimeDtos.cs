@@ -54,3 +54,43 @@ public class HoldTokenData
     public List<Guid> ShowtimeSeatIds { get; set; } = new();
     public DateTime ExpiresAt { get; set; }
 }
+
+public class CreateShowtimeRequest
+{
+    public Guid MovieId { get; set; }
+    public Guid AuditoriumId { get; set; }
+    public DateTime StartTime { get; set; }
+    public decimal BasePrice { get; set; }
+}
+
+public class AdminShowtimeSeatDto
+{
+    public Guid ShowtimeSeatId { get; set; }
+    public Guid SeatId { get; set; }
+    public string SeatCode { get; set; } = string.Empty;
+    public string RowLabel { get; set; } = string.Empty;
+    public int ColumnNumber { get; set; }
+    public Guid SeatTypeId { get; set; }
+    public string SeatTypeName { get; set; } = string.Empty;
+    public string ColorCode { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public string Status { get; set; } = "available"; // available, holding, sold, maintenance
+    public SeatCustomerInfoDto? CustomerInfo { get; set; }
+}
+
+public class SeatCustomerInfoDto
+{
+    public string? CustomerName { get; set; }
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string? BookingCode { get; set; }
+    public string? BookingStatus { get; set; }
+    public DateTime? BookedAt { get; set; }
+    public DateTime? HoldingExpiresAt { get; set; }
+}
+
+public class SetSeatMaintenanceRequest
+{
+    public bool Maintenance { get; set; }
+}
+

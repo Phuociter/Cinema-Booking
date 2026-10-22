@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { ArrowRight, LockKeyhole, ShieldAlert } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 
 // Client Pages
@@ -14,12 +15,14 @@ import Favorites from './pages/Favorite';
 import MyBooking from './pages/MyBooking';
 import Profile from './pages/Profile';
 import PaymentCallback from './pages/PaymentCallback';
+import ResetPassword from './pages/ResetPassword';
 
 // Layout & Auth
 import PublicLayout from './components/PublicLayout';
 import { useAuth } from './auth/AuthContext';
 
-// Admin Portal Pages
+// Admin Portal Pages & Layout
+import AdminLayout from './components/admin/layout/AdminLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminMovies from './pages/admin/AdminMovies';
 import AdminCinemas from './pages/admin/AdminCinemas';
@@ -62,11 +65,64 @@ const ProtectedRoute = ({ children }) => {
 };
 
 const AdminRoute = ({ children }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, openLoginModal } = useAuth();
+  const location = useLocation();
   const isAdmin = user?.roles?.some((role) => role.toLowerCase() === 'admin');
 
-  if (!isAuthenticated) return <Navigate to="/" replace />;
-  return isAdmin ? children : <Navigate to="/" replace />;
+  useEffect(() => {
+    if (!isAuthenticated) {
+      sessionStorage.setItem(
+        'redirect_after_login',
+        `${location.pathname}${location.search}`
+      );
+      openLoginModal();
+    }
+  }, [isAuthenticated, location.pathname, location.search, openLoginModal]);
+
+  if (!isAuthenticated) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-4 text-white">
+        <section className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-8 text-center">
+          <LockKeyhole className="mx-auto h-10 w-10 text-amber-300" />
+          <h1 className="mt-4 text-2xl font-bold">Cần đăng nhập quản trị</h1>
+          <p className="mt-2 text-sm text-slate-400">
+            Đăng nhập bằng tài khoản có quyền Admin để tiếp tục.
+          </p>
+          <button
+            type="button"
+            onClick={openLoginModal}
+            className="mt-6 rounded-xl bg-red-600 px-5 py-3 font-semibold text-white transition hover:bg-red-500"
+          >
+            Mở cửa sổ đăng nhập
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-4 text-white">
+        <section className="w-full max-w-md rounded-2xl border border-red-500/20 bg-slate-900 p-8 text-center">
+          <ShieldAlert className="mx-auto h-10 w-10 text-red-300" />
+          <h1 className="mt-4 text-2xl font-bold">Tài khoản chưa có quyền Admin</h1>
+          <p className="mt-2 text-sm text-slate-400">
+            Tài khoản hiện tại không được phép truy cập khu vực quản trị. Hãy đăng xuất và đăng nhập bằng tài khoản quản trị.
+          </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <Link to="/" className="rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-200 hover:bg-white/5">
+              Về trang chủ
+            </Link>
+            <Link to="/profile" className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-500">
+              Kiểm tra tài khoản
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  return children;
 };
 
 const App = () => {
@@ -75,13 +131,15 @@ const App = () => {
       <Toaster />
       <Routes>
         {/* Admin Portal Routes (Bảo vệ bởi AdminRoute) */}
-        <Route path='/admin' element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-        <Route path='/admin/dashboard' element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-        <Route path='/admin/movies' element={<AdminRoute><AdminMovies /></AdminRoute>} />
-        <Route path='/admin/cinemas' element={<AdminRoute><AdminCinemas /></AdminRoute>} />
-        <Route path='/admin/showtimes' element={<AdminRoute><AdminShowtimes /></AdminRoute>} />
-        <Route path='/admin/snacks' element={<AdminRoute><AdminSnacks /></AdminRoute>} />
-        <Route path='/admin/users' element={<AdminRoute><AdminUsers /></AdminRoute>} />
+        <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+          <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="movies" element={<AdminMovies />} />
+          <Route path="cinemas" element={<AdminCinemas />} />
+          <Route path="showtimes" element={<AdminShowtimes />} />
+          <Route path="snacks" element={<AdminSnacks />} />
+          <Route path="users" element={<AdminUsers />} />
+        </Route>
 
         {/* Client Portal Routes (Tự động kèm Navbar & Footer qua PublicLayout) */}
         <Route element={<PublicLayout />}>
@@ -98,6 +156,7 @@ const App = () => {
           <Route path='/my-booking' element={<ProtectedRoute><MyBooking /></ProtectedRoute>} />
           <Route path='/profile' element={<ProtectedRoute><Profile /></ProtectedRoute>} />
           <Route path='/payment/callback' element={<PaymentCallback />} />
+          <Route path='/reset-password' element={<ResetPassword />} />
         </Route>
       </Routes>
     </>

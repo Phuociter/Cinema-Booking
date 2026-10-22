@@ -348,7 +348,7 @@ INSERT INTO Tickets (id, booking_id, showtime_seat_id, price, created_at) VALUES
 ('0000000e-0000-0000-0000-000000000004', '0000000d-0000-0000-0000-000000000002', '0000000a-0000-0000-0000-000000000052', 95000, now()),
 ('0000000e-0000-0000-0000-000000000005', '0000000d-0000-0000-0000-000000000003', '0000000a-0000-0000-0000-000000000053', 95000, now());
 
--- 3. Cập nhật 5 ghế thuộc Suất chiếu #2 sang trạng thái 'reserved'
+-- 3. Cập nhật các ghế thuộc Suất chiếu #2 sang trạng thái 'reserved'
 UPDATE ShowtimeSeats 
 SET status = 'reserved' 
 WHERE id IN (
@@ -356,11 +356,16 @@ WHERE id IN (
     '0000000a-0000-0000-0000-000000000050',
     '0000000a-0000-0000-0000-000000000051',
     '0000000a-0000-0000-0000-000000000052',
-    '0000000a-0000-0000-0000-000000000053'
+    '0000000a-0000-0000-0000-000000000053',
+    '0000000a-0000-0000-0000-000000000054',
+    '0000000a-0000-0000-0000-000000000073'
 );
 
 -- 4. Insert bắp nước cho đơn số 2 (2 phần bắp nước = 100.000đ)
 INSERT INTO BookingSnacks (id, booking_id, cinema_snack_id, quantity, unit_price) VALUES
 ('0000000f-0000-0000-0000-000000000001', '0000000d-0000-0000-0000-000000000002', '0000000b-0000-0000-0000-000000000001', 2, 50000);
+
+-- 5. Đảm bảo tất cả ghế đã có vé của booking thành công đều ở trạng thái 'reserved'
+UPDATE ShowtimeSeats SET status = 'reserved' WHERE status = 'available' AND id IN (SELECT t.showtime_seat_id FROM Tickets t JOIN Bookings b ON b.id = t.booking_id WHERE b.status = 'success');
 
 COMMIT;

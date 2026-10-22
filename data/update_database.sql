@@ -6,12 +6,21 @@
 --   3. Cập nhật đa dạng loại phòng chiếu (2D, 3D, IMAX, GOLDCLASS)
 --   4. Sinh 36,000 suất chiếu đa dạng phủ trọn 30 ngày (nhiều khung giờ sáng/trưa/chiều/tối/đêm)
 --   5. Khởi tạo toàn bộ ghế suất chiếu kèm trạng thái thực tế
--- Cách chạy:
---   docker exec -i cinema-postgres psql -U postgres -d cinema_db < data/update_database.sql
+-- Cách chạy an toàn (tránh lỗi font trên terminal Windows):
+--   Cách 1 (khuyến nghị cho mọi OS):
+--     docker cp data/update_database.sql cinema-postgres:/tmp/update_database.sql
+--     docker exec -i cinema-postgres psql -U postgres -d cinema_db -f /tmp/update_database.sql
+--   Cách 2 (CMD):
+--     chcp 65001
+--     docker exec -i cinema-postgres psql -U postgres -d cinema_db < data/update_database.sql
+--   Cách 3 (PowerShell):
+--     Get-Content -Encoding UTF8 data/update_database.sql | docker exec -i cinema-postgres psql -U postgres -d cinema_db
 --   docker exec -i cinema-redis redis-cli FLUSHDB
 -- ============================================================
 
 BEGIN;
+
+SET client_encoding = 'UTF8';
 
 -- ============================================================
 -- PHẦN 0: CẬP NHẬT CẤU TRÚC BẢNG USERS (HỖ TRỢ HYBRID AUTH / CLERK SSO)
@@ -86,6 +95,30 @@ SELECT u.id, r.id
 FROM Users u, Roles r 
 WHERE u.email = 'staff@example.com' AND r.name = 'Staff'
 ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- PHẦN 0.1: CẬP NHẬT RÀNG BUỘC SUẤT CHIẾU & ĐỒNG BỘ TRẠNG THÁI GHẾ ĐÃ BÁN
+-- ============================================================
+
+-- 1. Nâng cấp ràng buộc chống trùng lịch chiếu (loại trừ các suất đã bị hủy)
+ALTER TABLE showtimes DROP CONSTRAINT IF EXISTS no_overlapping_showtimes;
+ALTER TABLE showtimes 
+ADD CONSTRAINT no_overlapping_showtimes 
+EXCLUDE USING gist (
+    auditorium_id WITH =,
+    tstzrange(start_time, end_time) WITH &&
+) WHERE (status <> 'cancelled');
+
+-- 2. Đồng bộ trạng thái reserved cho tất cả ghế đã có vé thuộc đơn hàng thành công
+UPDATE showtimeseats 
+SET status = 'reserved' 
+WHERE status = 'available' 
+  AND id IN (
+      SELECT t.showtime_seat_id 
+      FROM tickets t 
+      JOIN bookings b ON b.id = t.booking_id 
+      WHERE b.status = 'success'
+  );
 
 -- ============================================================
 -- PHẦN 1: CHUẨN HÓA FONT TIẾNG VIỆT UTF-8
@@ -234,6 +267,20 @@ FROM (
 ) sub
 WHERE s.id = sub.id;
 
+-- 6. Bảng Users (Chuẩn hóa tên Quản Trị Viên và các tài khoản khách hàng mẫu)
+UPDATE users 
+SET full_name = 'Quản Trị Viên' 
+WHERE email = 'admin@example.com';
+
+UPDATE users u
+SET full_name = (ARRAY['Nguyễn','Trần','Lê','Phạm','Hoàng'])[(sub.n % 5) + 1] || ' Văn Khách ' || sub.n
+FROM (
+  SELECT id, substring(id::text from 25)::int AS n
+  FROM users
+  WHERE email LIKE 'khachhang%@example.com'
+) sub
+WHERE u.id = sub.id;
+
 -- ============================================================
 -- PHẦN 2: TÁI TẠO SUẤT CHIẾU 30 NGÀY ĐA DẠNG KHUNG GIỜ
 -- ============================================================
@@ -318,8 +365,8 @@ SELECT
     m.movie_id,
     a.auditorium_id,
     d.day_offset,
-    ((CURRENT_DATE + d.day_offset) + s.slot_time)::timestamptz AS start_time,
-    (((CURRENT_DATE + d.day_offset) + s.slot_time)::timestamptz + (m.duration_min || ' minutes')::interval) AS end_time,
+    (((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + d.day_offset) + s.slot_time) AT TIME ZONE 'Asia/Ho_Chi_Minh' AS start_time,
+    ((((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + d.day_offset) + s.slot_time) AT TIME ZONE 'Asia/Ho_Chi_Minh' + (m.duration_min || ' minutes')::interval) AS end_time,
     CASE 
       WHEN a.hall_type = 'IMAX' THEN 120000
       WHEN a.hall_type = 'GOLDCLASS' THEN 150000

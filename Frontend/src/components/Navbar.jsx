@@ -14,10 +14,12 @@ import {
   User,
   LogIn,
   ChevronDown,
-  LogOut
+  LogOut,
+  LayoutDashboard
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import SearchModal from './SearchModal';
+import UserAvatar from './UserAvatar';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -27,6 +29,7 @@ const Navbar = () => {
   const { user, isAuthenticated, logout, openLoginModal } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isAdmin = user?.roles?.some((role) => role.toLowerCase() === 'admin');
 
   // Handle scroll effect
   useEffect(() => {
@@ -168,9 +171,7 @@ const Navbar = () => {
                     onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                     className="flex items-center gap-2.5 rounded-full bg-white/10 hover:bg-white/20 px-3.5 py-2 text-sm text-gray-200 hover:text-white transition-all duration-200 border border-white/10 shadow-sm"
                   >
-                    <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-xs font-bold text-white uppercase">
-                      {user?.fullName ? user.fullName[0] : 'U'}
-                    </div>
+                    <UserAvatar src={user?.avatarUrl} name={user?.fullName} className="h-6 w-6 text-xs" />
                     <span className="hidden lg:inline text-sm font-medium">{user?.fullName || 'Tài khoản'}</span>
                     <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isUserMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -187,6 +188,16 @@ const Navbar = () => {
                           <p className="text-sm font-semibold text-white truncate">{user?.fullName || 'Người dùng'}</p>
                           <p className="text-xs text-gray-400 truncate">{user?.email}</p>
                         </div>
+                        {isAdmin && (
+                          <Link
+                            to="/admin"
+                            onClick={() => setIsUserMenuOpen(false)}
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10 transition-colors font-medium border-b border-white/10"
+                          >
+                            <LayoutDashboard className="w-4 h-4 text-yellow-400" />
+                            <span>Trang Quản Trị</span>
+                          </Link>
+                        )}
                         <Link
                           to="/profile"
                           onClick={() => setIsUserMenuOpen(false)}
@@ -288,9 +299,7 @@ const Navbar = () => {
               {isAuthenticated && (
                 <div className="pt-4 mt-4 border-t border-white/10 space-y-2">
                   <div className="flex items-center gap-3 px-4 py-3 bg-white/5 rounded-xl">
-                    <div className="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center font-bold text-white uppercase">
-                      {user?.fullName ? user.fullName[0] : 'U'}
-                    </div>
+                    <UserAvatar src={user?.avatarUrl} name={user?.fullName} className="h-10 w-10 text-base" />
                     <div className="overflow-hidden">
                       <p className="text-white font-medium truncate">
                         {user?.fullName || 'Bạn'}
@@ -300,6 +309,19 @@ const Navbar = () => {
                       </p>
                     </div>
                   </div>
+
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        navigate('/admin');
+                        setIsOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10 rounded-xl transition-colors duration-300 font-medium"
+                    >
+                      <LayoutDashboard className="w-5 h-5 text-yellow-400" />
+                      <span>Trang Quản Trị</span>
+                    </button>
+                  )}
                   
                   <button
                     onClick={() => {

@@ -1,8 +1,10 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using MovieBooking.API.Services;
 using MovieBooking.Data;
 using MovieBooking.Data.Repositories;
 using MovieBooking.Data.Repositories.Interfaces;
@@ -77,6 +79,23 @@ builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
 builder.Services.AddScoped<ISnackService, SnackService>();
 builder.Services.AddScoped<ICinemaService, CinemaService>();
+builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddScoped<SmtpEmailSender>();
+    builder.Services.AddScoped<ConsoleEmailSender>();
+    builder.Services.AddScoped<IEmailSender>(serviceProvider =>
+    {
+        var smtpEmailSender = serviceProvider.GetRequiredService<SmtpEmailSender>();
+        return smtpEmailSender.IsConfigured
+            ? smtpEmailSender
+            : serviceProvider.GetRequiredService<ConsoleEmailSender>();
+    });
+}
+else
+{
+    builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+}
 
 // 7. JWT Authentication & Authorization (Dual Schemes: InternalJwt + ClerkJwt)
 const string InternalScheme = "InternalJwt";
@@ -155,11 +174,24 @@ using (var scope = builder.Services.BuildServiceProvider().CreateScope())
 var app = builder.Build();
 
 // Configure HTTP request pipeline
+var avatarStoragePath = Path.Combine(
+    builder.Environment.ContentRootPath,
+    "wwwroot",
+    "uploads",
+    "avatars");
+Directory.CreateDirectory(avatarStoragePath);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(avatarStoragePath),
+    RequestPath = "/uploads/avatars"
+});
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
