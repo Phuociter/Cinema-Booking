@@ -6,9 +6,13 @@ import timeFormat from '../lib/timeFormat';
 const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
     const navigate = useNavigate();
 
+    const movieId = movie.id || movie._id;
+
     const handleCardClick = () => {
-        navigate('/movies/' + movie.id);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        if (movieId) {
+            navigate('/movies/' + movieId);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
     };
 
     const formatReleaseDate = (date) => {
@@ -33,7 +37,17 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
             )
             .filter(Boolean)
             .join(' • ')
-        : '';
+        : (typeof movie.genre === 'string' ? movie.genre : '');
+
+    // Đọc ảnh linh hoạt: hỗ trợ cả API Backend (posterUrl, backdropUrl) và TMDB/Dummy (poster_path, backdrop_path)
+    const posterSrc = movie.posterUrl || movie.poster_path || movie.backdropUrl || movie.backdrop_path;
+    const releaseDate = movie.releaseDate || movie.release_date;
+    const durationMinutes = movie.duration || movie.durationMin || movie.runtime;
+    const ratingValue = movie.rating !== undefined && movie.rating !== null
+        ? movie.rating
+        : (movie.ratingScore !== undefined && movie.ratingScore !== null
+            ? movie.ratingScore
+            : movie.vote_average);
 
     return (
         <div
@@ -47,22 +61,26 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
             {/* Poster */}
             <div
                 onClick={handleCardClick}
-                className="relative overflow-hidden rounded-lg cursor-pointer"
+                className="relative overflow-hidden rounded-lg cursor-pointer bg-slate-900"
             >
                 <img
-                    src={movie.posterUrl || movie.backdropUrl}
+                    src={posterSrc}
+                    onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500';
+                    }}
                     alt={`${movie.title} poster`}
                     loading="lazy"
                     className="rounded-lg h-56 w-full object-cover transition-transform duration-300 group-hover:scale-105"
                 />
 
                 {/* Rating */}
-                {movie.rating !== undefined && movie.rating !== null && (
+                {ratingValue !== undefined && ratingValue !== null && (
                     <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 px-2 py-1 rounded-md text-sm">
                         <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
 
                         <span className="text-white">
-                            {Number(movie.rating).toFixed(1)}
+                            {Number(ratingValue).toFixed(1)}
                         </span>
                     </div>
                 )}
@@ -87,12 +105,12 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
 
                 {/* Release year */}
                 <p className="text-gray-400 text-sm mt-2">
-                    Năm phát hành: {formatReleaseDate(movie.releaseDate)}
+                    Năm phát hành: {formatReleaseDate(releaseDate)}
                 </p>
 
                 {/* Duration */}
                 <p className="text-gray-400 text-sm mt-1">
-                    Thời lượng: {formatDuration(movie.duration)}
+                    Thời lượng: {formatDuration(durationMinutes)}
                 </p>
             </div>
 
@@ -107,7 +125,7 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
 
                 {onRemove && (
                     <button
-                        onClick={() => onRemove(movie.id)}
+                        onClick={() => onRemove(movieId)}
                         className="p-2 bg-gray-700 hover:bg-red-600 text-white rounded-lg transition-colors duration-200"
                         title="Xóa phim"
                     >

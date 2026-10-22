@@ -6,12 +6,21 @@
 --   3. Cập nhật đa dạng loại phòng chiếu (2D, 3D, IMAX, GOLDCLASS)
 --   4. Sinh 36,000 suất chiếu đa dạng phủ trọn 30 ngày (nhiều khung giờ sáng/trưa/chiều/tối/đêm)
 --   5. Khởi tạo toàn bộ ghế suất chiếu kèm trạng thái thực tế
--- Cách chạy:
---   docker exec -i cinema-postgres psql -U postgres -d cinema_db < data/update_database.sql
+-- Cách chạy an toàn (tránh lỗi font trên terminal Windows):
+--   Cách 1 (khuyến nghị cho mọi OS):
+--     docker cp data/update_database.sql cinema-postgres:/tmp/update_database.sql
+--     docker exec -i cinema-postgres psql -U postgres -d cinema_db -f /tmp/update_database.sql
+--   Cách 2 (CMD):
+--     chcp 65001
+--     docker exec -i cinema-postgres psql -U postgres -d cinema_db < data/update_database.sql
+--   Cách 3 (PowerShell):
+--     Get-Content -Encoding UTF8 data/update_database.sql | docker exec -i cinema-postgres psql -U postgres -d cinema_db
 --   docker exec -i cinema-redis redis-cli FLUSHDB
 -- ============================================================
 
 BEGIN;
+
+SET client_encoding = 'UTF8';
 
 -- ============================================================
 -- PHẦN 0: CẬP NHẬT CẤU TRÚC BẢNG USERS (HỖ TRỢ HYBRID AUTH / CLERK SSO)
@@ -43,6 +52,71 @@ BEGIN
         );
     END IF;
 END $$;
+
+-- 4. Đảm bảo đủ các Roles hệ thống (Customer, Staff, Admin)
+INSERT INTO Roles (name)
+VALUES ('Customer'), ('Staff'), ('Admin')
+ON CONFLICT (name) DO NOTHING;
+
+-- 5. Đảm bảo tài khoản Admin mẫu luôn tồn tại (admin@example.com / pass: admin)
+INSERT INTO Users (id, full_name, email, phone, password_hash, avatar_url, auth_provider)
+SELECT 
+    '0000000c-0000-0000-0000-000000000000'::uuid,
+    'Quản Trị Viên',
+    'admin@example.com',
+    '0900000000',
+    crypt('admin', gen_salt('bf')),
+    'https://i.pravatar.cc/300?img=65',
+    'local'
+WHERE NOT EXISTS (SELECT 1 FROM Users WHERE email = 'admin@example.com');
+
+INSERT INTO UserRoles (user_id, role_id)
+SELECT u.id, r.id 
+FROM Users u, Roles r 
+WHERE u.email = 'admin@example.com' AND r.name = 'Admin'
+ON CONFLICT DO NOTHING;
+
+-- 6. Khởi tạo tài khoản Nhân Viên quầy rạp mẫu (staff@example.com / pass: 123456)
+INSERT INTO Users (id, full_name, email, phone, password_hash, avatar_url, auth_provider)
+SELECT 
+    '0000000c-0000-0000-0000-000000000099'::uuid,
+    'Nhân Viên Quầy Rạp',
+    'staff@example.com',
+    '0901234567',
+    crypt('123456', gen_salt('bf')),
+    'https://i.pravatar.cc/300?img=12',
+    'local'
+WHERE NOT EXISTS (SELECT 1 FROM Users WHERE email = 'staff@example.com');
+
+INSERT INTO UserRoles (user_id, role_id)
+SELECT u.id, r.id 
+FROM Users u, Roles r 
+WHERE u.email = 'staff@example.com' AND r.name = 'Staff'
+ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- PHẦN 0.1: CẬP NHẬT RÀNG BUỘC SUẤT CHIẾU & ĐỒNG BỘ TRẠNG THÁI GHẾ ĐÃ BÁN
+-- ============================================================
+
+-- 1. Nâng cấp ràng buộc chống trùng lịch chiếu (loại trừ các suất đã bị hủy)
+ALTER TABLE showtimes DROP CONSTRAINT IF EXISTS no_overlapping_showtimes;
+ALTER TABLE showtimes 
+ADD CONSTRAINT no_overlapping_showtimes 
+EXCLUDE USING gist (
+    auditorium_id WITH =,
+    tstzrange(start_time, end_time) WITH &&
+) WHERE (status <> 'cancelled');
+
+-- 2. Đồng bộ trạng thái reserved cho tất cả ghế đã có vé thuộc đơn hàng thành công
+UPDATE showtimeseats 
+SET status = 'reserved' 
+WHERE status = 'available' 
+  AND id IN (
+      SELECT t.showtime_seat_id 
+      FROM tickets t 
+      JOIN bookings b ON b.id = t.booking_id 
+      WHERE b.status = 'success'
+  );
 
 -- ============================================================
 -- PHẦN 1: CHUẨN HÓA FONT TIẾNG VIỆT UTF-8
@@ -76,6 +150,35 @@ FROM (
   FROM movies
 ) sub
 WHERE m.id = sub.id;
+
+-- 2b. Bảng Directors (100 đạo diễn)
+UPDATE directors d
+SET name = 
+    (ARRAY['Nguyễn','Trần','Lê','Phạm','Hoàng','Huỳnh','Phan','Vũ','Võ','Đặng','Bùi','Đỗ','Hồ','Ngô','Dương'])[((sub.n-1)/15)::int % 15 + 1]
+    || ' ' ||
+    (ARRAY['Văn An','Thị Bình','Minh Châu','Quốc Dũng','Thu Hà','Hoàng Long','Ngọc Mai','Tuấn Nam','Thanh Phong','Kim Quyên','Đức Sơn','Bảo Trâm','Việt Trung','Hải Yến','Xuân Nghi'])[(sub.n-1) % 15 + 1]
+FROM (
+  SELECT id, substring(id::text from 25)::int AS n
+  FROM directors
+) sub
+WHERE d.id = sub.id;
+
+-- 2c. Bảng Actors (100 diễn viên)
+UPDATE actors a
+SET name = 
+    (ARRAY['Nguyễn','Trần','Lê','Phạm','Hoàng','Huỳnh','Phan','Vũ','Võ','Đặng','Bùi','Đỗ','Hồ','Ngô','Dương'])[((sub.n-1)/15)::int % 15 + 1]
+    || ' ' ||
+    (ARRAY['Gia Bảo','Khánh Chi','Duy Khang','Mỹ Duyên','Anh Khoa','Ngọc Lan','Bá Lộc','Thùy Linh','Hữu Nghĩa','Diễm My','Trọng Phúc','Cẩm Tú','Nhật Vy','Thế Vinh','Yến Nhi'])[(sub.n-1) % 15 + 1]
+FROM (
+  SELECT id, substring(id::text from 25)::int AS n
+  FROM actors
+) sub
+WHERE a.id = sub.id;
+
+-- 2d. Bảng MovieActors (Tên nhân vật)
+UPDATE movieactors 
+SET character_name = REPLACE(character_name, 'Nh?n v?t', 'Nhân vật') 
+WHERE character_name LIKE 'Nh?n v?t%';
 
 -- 3. Bảng Cinemas (100 cụm rạp phân bổ phủ kín 34 Tỉnh / Thành phố)
 UPDATE cinemas c
@@ -135,12 +238,24 @@ FROM (
 ) sub
 WHERE a.id = sub.id;
 
--- 5. Bảng Snacks (100 món bắp nước)
+-- 5. Bảng Snacks (100 món bắp nước kèm ảnh Unsplash rạp phim chuẩn)
 UPDATE snacks s
 SET
   name = (ARRAY['Bắp Rang Bơ','Combo Nước Ngọt','Snack Khoai Tây','Hot Dog Phô Mai','Kẹo Dẻo Trái Cây','Nachos Sốt Phô Mai','Trà Sữa Trân Châu','Nước Ngọt Có Gas','Bánh Mì Que','Pop Corn Caramel'])[(sub.n % 10) + 1]
          || ' - ' ||
          (ARRAY['Nhỏ','Vừa','Lớn','Đặc Biệt','Combo Đôi'])[(sub.n % 5) + 1],
+  image_url = CASE (sub.n % 10) + 1
+      WHEN 1 THEN 'https://images.unsplash.com/photo-1585647347384-2593bc35786b?w=400'
+      WHEN 2 THEN 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=400'
+      WHEN 3 THEN 'https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=400'
+      WHEN 4 THEN 'https://images.unsplash.com/photo-1619740455993-9e612b1af08a?w=400'
+      WHEN 5 THEN 'https://images.unsplash.com/photo-1582058091505-f87a2e55a40f?w=400'
+      WHEN 6 THEN 'https://images.unsplash.com/photo-1513456852971-30c0b8199d4d?w=400'
+      WHEN 7 THEN 'https://images.unsplash.com/photo-1558857563-b371033873b8?w=400'
+      WHEN 8 THEN 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=400'
+      WHEN 9 THEN 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400'
+      ELSE 'https://images.unsplash.com/photo-1512149177596-f817c7ef5d4c?w=400'
+  END,
   description = 'Món ăn vặt yêu thích khi xem phim, thơm ngon và tiện lợi.'
 FROM (
   SELECT 
@@ -149,6 +264,20 @@ FROM (
   FROM snacks
 ) sub
 WHERE s.id = sub.id;
+
+-- 6. Bảng Users (Chuẩn hóa tên Quản Trị Viên và các tài khoản khách hàng mẫu)
+UPDATE users 
+SET full_name = 'Quản Trị Viên' 
+WHERE email = 'admin@example.com';
+
+UPDATE users u
+SET full_name = (ARRAY['Nguyễn','Trần','Lê','Phạm','Hoàng'])[(sub.n % 5) + 1] || ' Văn Khách ' || sub.n
+FROM (
+  SELECT id, substring(id::text from 25)::int AS n
+  FROM users
+  WHERE email LIKE 'khachhang%@example.com'
+) sub
+WHERE u.id = sub.id;
 
 -- ============================================================
 -- PHẦN 2: TÁI TẠO SUẤT CHIẾU 30 NGÀY ĐA DẠNG KHUNG GIỜ
@@ -234,8 +363,8 @@ SELECT
     m.movie_id,
     a.auditorium_id,
     d.day_offset,
-    ((CURRENT_DATE + d.day_offset) + s.slot_time)::timestamptz AS start_time,
-    (((CURRENT_DATE + d.day_offset) + s.slot_time)::timestamptz + (m.duration_min || ' minutes')::interval) AS end_time,
+    (((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + d.day_offset) + s.slot_time) AT TIME ZONE 'Asia/Ho_Chi_Minh' AS start_time,
+    ((((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + d.day_offset) + s.slot_time) AT TIME ZONE 'Asia/Ho_Chi_Minh' + (m.duration_min || ' minutes')::interval) AS end_time,
     CASE 
       WHEN a.hall_type = 'IMAX' THEN 120000
       WHEN a.hall_type = 'GOLDCLASS' THEN 150000

@@ -6,9 +6,10 @@ import TrailerSection from '../components/TrailerSection'
 const Home = () => {
   return (
     <>
-      <HeroSection/>
-      <FeatueredSection/>
-      <TrailerSection/>
+      <HeroSection />
+      <FeatueredSection />
+      {/* Tạm ẩn TrailerSection theo yêu cầu */}
+      {/* <TrailerSection /> */}
     </>
   )
 }

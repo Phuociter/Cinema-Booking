@@ -4,6 +4,16 @@ import axios from 'axios';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 const TOKEN_KEY = 'cinema_access_token';
 
+export const resolveApiAssetUrl = (assetUrl) => {
+  if (!assetUrl) return '';
+  try {
+    const apiOrigin = new URL(API_BASE_URL, window.location.origin).origin;
+    return new URL(assetUrl, apiOrigin).toString();
+  } catch {
+    return assetUrl;
+  }
+};
+
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
   headers: {

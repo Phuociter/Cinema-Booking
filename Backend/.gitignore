@@ -35,6 +35,7 @@ dist-ssr
 *.sw?
 **/bin/
 **/obj/
+MovieBooking.API/wwwroot/uploads/avatars/
 **/node_modules/
 .env
 .vs/

@@ -26,6 +26,20 @@ POSTGRES_PORT=5432
 JWT_SECRET=your_super_secret_jwt_key_here_minimum_32_characters_long
 ```
 
+Khi chạy Development, backend dùng SMTP nếu cấu hình SMTP hợp lệ; nếu chưa cấu hình thì liên kết reset chỉ được in vào console. Ngoài Development, backend dùng SMTP đã cấu hình. Ví dụ cấu hình Gmail trong `Backend/.env` (không commit thông tin xác thực):
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your-sender@gmail.com
+SMTP_PASSWORD=your-google-app-password
+SMTP_FROM_EMAIL=your-sender@gmail.com
+SMTP_FROM_NAME=Cinema Booking
+SMTP_SECURE_SOCKET_OPTIONS=StartTls
+```
+
+Với Gmail, bật xác minh 2 bước cho tài khoản gửi thư rồi tạo Google App Password; điền App Password vào `SMTP_PASSWORD` (không dùng mật khẩu đăng nhập Gmail). Giữ `SMTP_USERNAME` và `SMTP_FROM_EMAIL` là địa chỉ Gmail gửi thư. `SMTP_SECURE_SOCKET_OPTIONS` nhận các giá trị `StartTls`, `SslOnConnect`, `StartTlsWhenAvailable`, `Auto` hoặc `None`. Sau khi sửa `.env`, khởi động lại backend. Liên kết reset dùng một lần, hết hạn sau 15 phút; Redis chỉ lưu SHA-256 của token và cooldown theo email là 60 giây. Đặt `FRONTEND_URL=http://localhost:3001` trong `Backend/.env` để tạo URL khôi phục. Tài khoản Clerk/Google phải khôi phục mật khẩu qua Clerk/Google.
+
 ---
 
 ## 🐳 3. Khởi Động Container PostgreSQL
@@ -98,6 +112,7 @@ cd d:\cinema\cinema2\Backend\MovieBooking.API
 dotnet run
 ```
 * Trang Swagger UI tra cứu API sẽ chạy tại: `http://localhost:5000/swagger` (hoặc port được gán tự động).
+* Ảnh đại diện tải lên được lưu tại `Backend/MovieBooking.API/wwwroot/uploads/avatars` và phục vụ qua `/uploads/avatars/...`. Khi triển khai production, cần gắn persistent volume cho thư mục này để ảnh không mất khi backend/container được thay mới.
 
 ### 2. Khởi chạy Frontend React 19 / Vite 7:
 ```bash
