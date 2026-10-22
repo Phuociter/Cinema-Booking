@@ -103,48 +103,48 @@ public class PaymentsController : ControllerBase
             signature
         };
 
-        var client = _httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(30);
+         var client = _httpClientFactory.CreateClient();
+         client.Timeout = TimeSpan.FromSeconds(30);
 
-        var jsonContent = new StringContent(JsonSerializer.Serialize(momoRequestPayload), Encoding.UTF8, "application/json");
-        var baseEndpoint = (_configuration["MOMO_API_ENDPOINT"] ?? "https://test-payment.momo.vn")
-            .Replace("/v2/gateway/api/create", "")
-            .Replace("/v2/gateway/api/query", "")
-            .TrimEnd('/');
-        var createUrl = $"{baseEndpoint}/v2/gateway/api/create";
+         var jsonContent = new StringContent(JsonSerializer.Serialize(momoRequestPayload), Encoding.UTF8, "application/json");
+         var baseEndpoint = (_configuration["MOMO_API_ENDPOINT"] ?? "https://test-payment.momo.vn")
+             .Replace("/v2/gateway/api/create", "")
+             .Replace("/v2/gateway/api/query", "")
+             .TrimEnd('/');
+         var createUrl = $"{baseEndpoint}/v2/gateway/api/create";
 
-        HttpResponseMessage response;
-        try
-        {
-            response = await client.PostAsync(createUrl, jsonContent);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Lỗi kết nối tới MoMo API Create");
-            return StatusCode(502, new { message = "Không thể kết nối đến cổng thanh toán MoMo.", error = ex.Message });
-        }
+         HttpResponseMessage response;
+         try
+         {
+             response = await client.PostAsync(createUrl, jsonContent);
+         }
+         catch (Exception ex)
+         {
+             _logger.LogError(ex, "Lỗi kết nối tới MoMo API Create");
+             return StatusCode(502, new { message = "Không thể kết nối đến cổng thanh toán MoMo.", error = ex.Message });
+         }
 
-        var responseBody = await response.Content.ReadAsStringAsync();
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogError("MoMo Create trả về HTTP {StatusCode}: {Response}", response.StatusCode, responseBody);
-            return StatusCode(502, new { message = "Khởi tạo thanh toán MoMo thất bại.", error = responseBody });
-        }
+         var responseBody = await response.Content.ReadAsStringAsync();
+         if (!response.IsSuccessStatusCode)
+         {
+             _logger.LogError("MoMo Create trả về HTTP {StatusCode}: {Response}", response.StatusCode, responseBody);
+             return StatusCode(502, new { message = "Khởi tạo thanh toán MoMo thất bại.", error = responseBody });
+         }
 
-        var momoResponse = JsonSerializer.Deserialize<MoMoCreateResponse>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+         var momoResponse = JsonSerializer.Deserialize<MoMoCreateResponse>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-        if (momoResponse == null || momoResponse.ResultCode != 0)
-        {
-            _logger.LogError("MoMo Create trả về lỗi: {Response}", responseBody);
-            return StatusCode(502, new
-            {
-                message = "Khởi tạo thanh toán MoMo thất bại.",
-                resultCode = momoResponse?.ResultCode,
-                error = momoResponse?.Message ?? responseBody
-            });
-        }
+         if (momoResponse == null || momoResponse.ResultCode != 0)
+         {
+             _logger.LogError("MoMo Create trả về lỗi: {Response}", responseBody);
+             return StatusCode(502, new
+             {
+                 message = "Khởi tạo thanh toán MoMo thất bại.",
+                 resultCode = momoResponse?.ResultCode,
+                 error = momoResponse?.Message ?? responseBody
+             });
+         }
 
-        // Tạo hoặc cập nhật bản ghi Payment trong DB
+         // Tạo hoặc cập nhật bản ghi Payment trong DB
         var payment = await _context.Payments.FirstOrDefaultAsync(p => p.BookingId == booking.Id);
         if (payment == null)
         {
@@ -186,7 +186,6 @@ public class PaymentsController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
-
         return Ok(new CreatePaymentResponse
         {
             BookingId = booking.Id,
