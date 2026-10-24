@@ -287,8 +287,7 @@ const BookingSummary = ({ showtimeId, cinemaId, selectedSeats = [], totalHoldPri
                         </>
                     ) : selectedSeats.length > 0 ? (
                         <>
-                            <span>Thanh Toán MoMo</span>
-                            <span className="text-xs bg-black/30 px-2 py-0.5 rounded-full">QR </span>
+                            <span>Thanh Toán</span>
                         </>
                     ) : (
                         'Vui Lòng Chọn Ghế Trước'

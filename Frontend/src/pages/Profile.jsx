@@ -26,7 +26,7 @@ const Profile = () => {
               : 'border-transparent text-slate-400 hover:text-white'
           }`}
         >
-          Thông Tin Tài Khoản (Dev E)
+          Thông Tin Tài Khoản
         </button>
         <button
           onClick={() => setActiveTab('bookings')}
@@ -36,7 +36,7 @@ const Profile = () => {
               : 'border-transparent text-slate-400 hover:text-white'
           }`}
         >
-          Vé Của Tôi (Dev D)
+          Vé Của Tôi
         </button>
       </div>
 

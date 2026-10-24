@@ -64,6 +64,7 @@ builder.Services.AddAutoMapper(cfg => cfg.AddProfile<MappingProfile>());
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IShowtimeRepository, ShowtimeRepository>();
 builder.Services.AddScoped<IShowtimeSeatRepository, ShowtimeSeatRepository>();
+builder.Services.AddScoped<IBookingRepository, BookingRepository>();
 
 // 5. Register Redis Cache (Singleton)
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
@@ -78,6 +79,7 @@ builder.Services.AddSingleton<IRedisService, RedisService>();
 // 6. Register Application Services
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
+builder.Services.AddScoped<IShowtimeSeatService, ShowtimeSeatService>();
 builder.Services.AddScoped<ISnackService, SnackService>();
 builder.Services.AddScoped<ICinemaService, CinemaService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>();
