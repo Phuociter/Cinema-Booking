@@ -51,7 +51,7 @@ const SearchableCinemaSelect = ({ cinemas = [], value = '', onChange }) => {
         className="flex items-center justify-between gap-2 bg-zinc-900 text-zinc-200 border border-zinc-800 rounded px-2.5 py-1.5 hover:border-zinc-700 focus:border-primary outline-none min-w-[170px] max-w-[260px] cursor-pointer text-left transition-colors"
       >
         <span className="truncate">
-          {selectedCinema ? selectedCinema.name : 'Mọi cụm rạp'}
+          {selectedCinema ? selectedCinema.name : 'Tất cả rạp'}
         </span>
         <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
@@ -85,7 +85,7 @@ const SearchableCinemaSelect = ({ cinemas = [], value = '', onChange }) => {
                   : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100'
               }`}
             >
-              <span>Mọi cụm rạp</span>
+              <span>Tất cả rạp</span>
               {!value && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
             </button>
 
@@ -117,6 +117,128 @@ const SearchableCinemaSelect = ({ cinemas = [], value = '', onChange }) => {
             {filteredCinemas.length === 0 && (
               <div className="py-3 text-center text-zinc-500 text-[11px]">
                 Không tìm thấy cụm rạp nào
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SearchableMovieSelect = ({ movies = [], value = '', onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const selectedMovie = movies.find((m) => m.id === value);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const filteredMovies = useMemo(() => {
+    if (!searchTerm.trim()) return movies;
+    const term = searchTerm.toLowerCase();
+    return movies.filter(
+      (m) => m.title && m.title.toLowerCase().includes(term)
+    );
+  }, [movies, searchTerm]);
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setIsOpen(!isOpen);
+          setSearchTerm('');
+        }}
+        className="flex items-center justify-between gap-2 bg-zinc-900 text-zinc-200 border border-zinc-800 rounded px-2.5 py-1.5 hover:border-zinc-700 focus:border-primary outline-none min-w-[160px] max-w-[240px] cursor-pointer text-left transition-colors"
+      >
+        <span className="truncate">
+          {selectedMovie ? selectedMovie.title : 'Tất cả phim'}
+        </span>
+        <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 w-64 max-h-72 rounded-md border border-zinc-800 bg-zinc-950 p-1.5 shadow-2xl shadow-black/80 z-50 flex flex-col text-xs">
+          {/* Ô input tìm kiếm ở đầu tiên */}
+          <div className="relative mb-1.5 shrink-0">
+            <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-zinc-400" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Tìm kiếm phim..."
+              className="w-full bg-zinc-900 text-zinc-200 border border-zinc-800 rounded pl-7 pr-2 py-1.5 text-xs placeholder-zinc-500 focus:border-primary outline-none"
+            />
+          </div>
+
+          {/* Danh sách phim có thanh cuộn */}
+          <div className="overflow-y-auto space-y-0.5 max-h-52 pr-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                onChange('');
+                setIsOpen(false);
+              }}
+              className={`w-full flex items-center justify-between rounded px-2 py-1.5 text-left transition-colors cursor-pointer ${
+                !value
+                  ? 'bg-primary/20 text-primary font-medium'
+                  : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100'
+              }`}
+            >
+              <span>Tất cả phim</span>
+              {!value && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+            </button>
+
+            {filteredMovies.map((m) => {
+              const isSelected = m.id === value;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(m.id);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between rounded px-2 py-1.5 text-left transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'bg-primary/20 text-primary font-medium'
+                      : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100'
+                  }`}
+                >
+                  <div className="truncate pr-1">
+                    <div className="truncate">{m.title}</div>
+                  </div>
+                  {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                </button>
+              );
+            })}
+
+            {filteredMovies.length === 0 && (
+              <div className="py-3 text-center text-zinc-500 text-[11px]">
+                Không tìm thấy phim nào
               </div>
             )}
           </div>
@@ -179,27 +301,38 @@ export const ShowtimeFilters = ({
         ))}
       </select>
 
-      {/* 3. Lọc Phim */}
-      <select
+      {/* 3. Lọc Phim (Có ô tìm kiếm nhanh) */}
+      <SearchableMovieSelect
+        movies={movies}
         value={filterState.movieId || ''}
-        onChange={(e) => handleChange('movieId', e.target.value)}
-        className="bg-zinc-900 text-zinc-200 border border-zinc-800 rounded px-2.5 py-1.5 focus:border-primary outline-none max-w-[180px] truncate"
-      >
-        <option value="">Mọi phim</option>
-        {movies.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.title}
-          </option>
-        ))}
-      </select>
+        onChange={(newMovieId) => handleChange('movieId', newMovieId)}
+      />
 
       {/* 4. Lọc Ngày chiếu */}
-      <input
-        type="date"
-        value={filterState.date || ''}
-        onChange={(e) => handleChange('date', e.target.value)}
-        className="bg-zinc-900 text-zinc-200 border border-zinc-800 rounded px-2.5 py-1.5 focus:border-primary outline-none"
-      />
+      <div className="relative flex items-center">
+        <input
+          type="date"
+          value={filterState.date || ''}
+          onChange={(e) => handleChange('date', e.target.value)}
+          onClick={(e) => {
+            try {
+              e.currentTarget.showPicker();
+            } catch (err) {}
+          }}
+          className="bg-zinc-900 text-zinc-200 border border-zinc-800 rounded px-2.5 py-1.5 focus:border-primary outline-none cursor-pointer [color-scheme:dark]"
+          title="Bấm để chọn ngày chiếu"
+        />
+        {filterState.date && (
+          <button
+            type="button"
+            onClick={() => handleChange('date', '')}
+            className="absolute right-7 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs px-1 rounded cursor-pointer transition-colors"
+            title="Xóa lọc ngày (xem tất cả ngày)"
+          >
+            ✕
+          </button>
+        )}
+      </div>
 
       {/* 5. Lọc Trạng thái */}
       <select
