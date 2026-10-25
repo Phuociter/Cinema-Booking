@@ -9,7 +9,6 @@ import {
   X, 
   Film, 
   MapPin, 
-  Star,
   Sparkles,
   ChevronRight,
   ChevronLeft
@@ -300,12 +299,7 @@ const Releases = () => {
                           {movie.ageRating || 'P'}
                         </span>
                       </div>
-                      {movie.ratingScore && (
-                        <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md border border-white/20 text-amber-400 text-xs font-bold flex items-center gap-1">
-                          <Star className="w-3 h-3 fill-amber-400" />
-                          {movie.ratingScore}
-                        </div>
-                      )}
+
                     </div>
 
                     <h3 className="font-bold text-white text-base sm:text-lg mb-1 line-clamp-1 group-hover:text-red-400 transition-colors" title={movie.title}>

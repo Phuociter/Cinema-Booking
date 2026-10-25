@@ -1,12 +1,10 @@
-﻿
+
 import React, { useState, useEffect } from 'react';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { useSearchParams } from 'react-router-dom';
 import MovieCard from '../components/MovieCard';
 import {
     Search,
-    Grid3X3,
-    List,
     Calendar,
     Star,
     Clock,
@@ -50,12 +48,12 @@ const Movies = () => {
 
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState(searchParam);
+    const [debouncedSearch, setDebouncedSearch] = useState(searchParam);
     const [selectedGenre, setSelectedGenre] = useState('all');
     const [selectedCity, setSelectedCity] = useState(cityParam);
     const [selectedCinemaId, setSelectedCinemaId] = useState(cinemaIdParam);
 
     const [sortBy, setSortBy] = useState('latest');
-    const [viewMode, setViewMode] = useState('grid');
     const [showFilters, setShowFilters] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
@@ -68,10 +66,27 @@ const Movies = () => {
     // Đồng bộ các bộ lọc từ URL khi mở trang hoặc URL thay đổi.
     useEffect(() => {
         setSearchQuery(searchParam);
+        setDebouncedSearch(searchParam);
         setSelectedCity(cityParam);
         setSelectedCinemaId(cinemaIdParam);
         setCurrentPage(1);
     }, [searchParam, cityParam, cinemaIdParam]);
+
+    // Debounce tìm kiếm 350ms
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setDebouncedSearch(searchQuery.trim());
+        }, 350);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [searchQuery]);
+
+    // Tự động về trang 1 khi từ khóa tìm kiếm (đã debounce) thay đổi
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [debouncedSearch]);
 
     // Tải danh sách rạp để tạo bộ lọc tỉnh/thành và cụm rạp.
     useEffect(() => {
@@ -176,7 +191,7 @@ const Movies = () => {
             try {
                 const response = await useMovies.getAllMovies({
                     status: 'now_showing',
-                    search: searchQuery.trim() || undefined,
+                    search: debouncedSearch || undefined,
                     genre: selectedGenre === 'all'
                         ? undefined
                         : selectedGenre,
@@ -218,7 +233,7 @@ const Movies = () => {
             cancelled = true;
         };
     }, [
-        searchQuery,
+        debouncedSearch,
         selectedGenre,
         selectedCity,
         selectedCinemaId,
@@ -389,6 +404,7 @@ const Movies = () => {
 
     const handleClearFilters = () => {
         setSearchQuery('');
+        setDebouncedSearch('');
         setSelectedGenre('all');
         setSortBy('latest');
         setSelectedCity('');
@@ -404,28 +420,6 @@ const Movies = () => {
             return next;
         });
     };
-
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
-                <div className="max-w-7xl mx-auto">
-                    <div className="flex items-center justify-center min-h-[60vh]">
-                        <div className="text-center">
-                            <Loader2 className="w-12 h-12 text-red-500 animate-spin mx-auto mb-4" />
-
-                            <h2 className="text-white text-xl font-semibold mb-2">
-                                Đang tải danh sách phim...
-                            </h2>
-
-                            <p className="text-gray-400">
-                                Vui lòng chờ trong giây lát
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 pb-12">
@@ -473,7 +467,11 @@ const Movies = () => {
                 <div className="bg-black/20 backdrop-blur-sm rounded-2xl border border-white/10 p-6 mb-8">
                     <div className="flex flex-col lg:flex-row gap-4 mb-4">
                         <div className="relative flex-1">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                            {loading ? (
+                                <Loader2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-red-500 animate-spin" />
+                            ) : (
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                            )}
 
                             <input
                                 type="text"
@@ -481,7 +479,6 @@ const Movies = () => {
                                 value={searchQuery}
                                 onChange={(event) => {
                                     setSearchQuery(event.target.value);
-                                    setCurrentPage(1);
                                 }}
                                 className="w-full pl-12 pr-12 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-red-500 focus:bg-white/10 transition-all duration-300"
                             />
@@ -492,6 +489,7 @@ const Movies = () => {
                                     aria-label="Xóa từ khóa tìm kiếm"
                                     onClick={() => {
                                         setSearchQuery('');
+                                        setDebouncedSearch('');
                                         setCurrentPage(1);
                                     }}
                                     className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
@@ -632,32 +630,6 @@ const Movies = () => {
                             </select>
                         </div>
 
-                        {/* Chế độ hiển thị */}
-                        <div className="flex-shrink-0">
-                            <label className="block text-gray-300 text-sm font-medium mb-2">
-                                Hiển thị
-                            </label>
-
-                            <div className="flex bg-white/5 rounded-lg p-1">
-                                <button
-                                    type="button"
-                                    aria-label="Hiển thị dạng lưới"
-                                    onClick={() => setViewMode('grid')}
-                                    className={viewMode === 'grid' ? "p-2 rounded transition-colors duration-300 bg-red-500 text-white" : "p-2 rounded transition-colors duration-300 text-gray-400 hover:text-white"}
-                                >
-                                    <Grid3X3 className="w-5 h-5" />
-                                </button>
-
-                                <button
-                                    type="button"
-                                    aria-label="Hiển thị dạng danh sách"
-                                    onClick={() => setViewMode('list')}
-                                    className={viewMode === 'list' ? "p-2 rounded transition-colors duration-300 bg-red-500 text-white" : "p-2 rounded transition-colors duration-300 text-gray-400 hover:text-white"}
-                                >
-                                    <List className="w-5 h-5" />
-                                </button>
-                            </div>
-                        </div>
 
                         {(searchQuery ||
                             selectedGenre !== 'all' ||
@@ -697,24 +669,22 @@ const Movies = () => {
                 </div>
 
                 {/* Danh sách phim */}
-                {filteredMovies.length > 0 ? (
-                    <div
-                        className={(viewMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
-                            : 'flex flex-col gap-4') + ' mb-12'}
-                    >
+                {loading && filteredMovies.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-24 text-center">
+                        <Loader2 className="w-10 h-10 text-red-500 animate-spin mb-4" />
+                        <h3 className="text-white text-lg font-semibold mb-1">
+                            Đang tải danh sách phim...
+                        </h3>
+                        <p className="text-gray-400 text-sm">
+                            Vui lòng chờ trong giây lát
+                        </p>
+                    </div>
+                ) : filteredMovies.length > 0 ? (
+                    <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-12 transition-opacity duration-200 ${loading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
                         {filteredMovies.map((movie) => (
-                            <div
-                                key={movie._id}
-                                className={
-                                    viewMode === 'list'
-                                        ? 'transform transition-all duration-300 hover:scale-[1.02]'
-                                        : ''
-                                }
-                            >
+                            <div key={movie._id}>
                                 <MovieCard
                                     movie={movie}
-                                    viewMode={viewMode}
                                 />
                             </div>
                         ))}

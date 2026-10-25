@@ -1,5 +1,5 @@
 import React from 'react';
-import { Star, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
 
@@ -74,16 +74,7 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
                     className="rounded-lg h-56 w-full object-cover transition-transform duration-300 group-hover:scale-105"
                 />
 
-                {/* Rating */}
-                {ratingValue !== undefined && ratingValue !== null && (
-                    <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 px-2 py-1 rounded-md text-sm">
-                        <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
 
-                        <span className="text-white">
-                            {Number(ratingValue).toFixed(1)}
-                        </span>
-                    </div>
-                )}
             </div>
 
             {/* Movie information */}

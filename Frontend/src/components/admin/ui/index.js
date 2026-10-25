@@ -3,3 +3,5 @@ export { StatusDot } from './StatusDot';
 export { EmptyState } from './EmptyState';
 export { AdminModal } from './AdminModal';
 export { Pagination } from './Pagination';
+export { TableContainer } from './TableContainer';
+export { SearchableSelect } from './SearchableSelect';

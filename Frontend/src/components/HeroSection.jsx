@@ -106,9 +106,6 @@ const HeroSection = () => {
           <span className="px-3 py-1 bg-red-600/90 text-white rounded-full text-xs font-black uppercase tracking-wider shadow-lg shadow-red-600/30 flex items-center gap-1.5">
             <Film className="w-3.5 h-3.5" /> Phim Chiếu Rạp Nổi Bật
           </span>
-          <span className="text-amber-400 font-semibold text-xs tracking-wider">
-            ⭐ {ratingStr} ĐÁNH GIÁ
-          </span>
         </div>
 
         <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold text-white mb-3 leading-tight tracking-tight">
