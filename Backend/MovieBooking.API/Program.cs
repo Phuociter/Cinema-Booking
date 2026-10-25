@@ -83,6 +83,7 @@ builder.Services.AddScoped<IShowtimeSeatService, ShowtimeSeatService>();
 builder.Services.AddScoped<ISnackService, SnackService>();
 builder.Services.AddScoped<ICinemaService, CinemaService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+builder.Services.AddScoped<IAdminBookingService, AdminBookingService>();
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddScoped<SmtpEmailSender>();

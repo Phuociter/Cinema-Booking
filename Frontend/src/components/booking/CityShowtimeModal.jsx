@@ -229,11 +229,7 @@ const CityShowtimeModal = ({ isOpen, onClose, movie, initialDate }) => {
                   <Clock className="w-3.5 h-3.5 text-gray-400" />
                   {movie.durationMin || 90} phút
                 </span>
-                {movie.ratingScore && (
-                  <span className="text-xs text-amber-400 font-semibold flex items-center gap-1">
-                    ★ {Number(movie.ratingScore).toFixed(1)}
-                  </span>
-                )}
+
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wide mb-1">
                 {movie.title}

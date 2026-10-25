@@ -67,7 +67,7 @@ const FeatueredSection = () => {
     };
 
     return (
-        <section className="px-6 md:px-16 lg:px-24 xl:px-44 overflow-hidden">
+        <section className="px-6 md:px-16 mb-12.5 lg:px-24 xl:px-44 overflow-hidden">
             <div className="relative flex items-center justify-between pt-20 pb-10">
                 <BlurCircle top="0" right="-80px" />
 
@@ -137,9 +137,10 @@ const FeatueredSection = () => {
                                 navigate('/movies');
                                 window.scrollTo({ top: 0, behavior: 'smooth' });
                             }}
-                            className="px-8 py-2 text-sm bg-red-600 hover:bg-red-700 transition-colors rounded-md font-medium text-white shadow-md hover:shadow-lg"
+                            className="group flex items-center gap-2 px-7 py-2.5 text-sm font-medium text-zinc-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.1] border border-white/10 hover:border-white/25 backdrop-blur-sm rounded-full transition-all duration-300 shadow-sm hover:shadow-md cursor-pointer"
                         >
-                            Xem thêm phim
+                            <span>Xem thêm phim</span>
+                            <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-white group-hover:translate-x-1 transition-transform duration-200" />
                         </button>
                     </div>
                 </>

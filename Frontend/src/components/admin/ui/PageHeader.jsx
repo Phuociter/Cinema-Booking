@@ -1,14 +1,21 @@
 import React from 'react';
 
-export const PageHeader = ({ title, description, children }) => {
+export const PageHeader = ({ title, description, badge, children, className = '' }) => {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 mb-5">
+    <div className={`flex flex-wrap items-center justify-between gap-2 ${className}`}>
       <div>
-        <h1 className="text-xl font-semibold text-zinc-100 tracking-tight">
-          {title}
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg sm:text-xl font-semibold text-zinc-100 tracking-tight">
+            {title}
+          </h1>
+          {badge && (
+            <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 border border-zinc-700/50">
+              {badge}
+            </span>
+          )}
+        </div>
         {description && (
-          <p className="mt-1 text-xs text-zinc-400">
+          <p className="mt-0.5 text-[11px] text-zinc-400">
             {description}
           </p>
         )}

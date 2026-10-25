@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Star, Clock, Film, Loader2, ArrowRight, Tag } from 'lucide-react';
+import { Search, X, Clock, Film, Loader2, ArrowRight, Tag } from 'lucide-react';
 import axiosInstance from '../api/axiosInstance';
 
 const POPULAR_TAGS = ['Hành Động', 'Kinh Dị', 'Hài', 'Viễn Tưởng', 'Chính Kịch', 'Hoạt Hình'];
@@ -201,12 +201,7 @@ const SearchModal = ({ isOpen, onClose }) => {
                             {movie.durationMin}p
                           </span>
                         )}
-                        {movie.ratingScore > 0 && (
-                          <span className="flex items-center gap-1 text-amber-400 font-semibold shrink-0">
-                            <Star className="w-3 h-3 fill-amber-400" />
-                            {movie.ratingScore}
-                          </span>
-                        )}
+
                       </div>
                     </div>
                     <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0 mr-1" />

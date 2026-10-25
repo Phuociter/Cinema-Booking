@@ -29,6 +29,7 @@ import AdminCinemas from './pages/admin/AdminCinemas';
 import AdminShowtimes from './pages/admin/AdminShowtimes';
 import AdminSnacks from './pages/admin/AdminSnacks';
 import AdminUsers from './pages/admin/AdminUsers';
+import AdminOrders from './pages/admin/AdminOrders';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, openLoginModal } = useAuth();
@@ -137,6 +138,7 @@ const App = () => {
           <Route path="movies" element={<AdminMovies />} />
           <Route path="cinemas" element={<AdminCinemas />} />
           <Route path="showtimes" element={<AdminShowtimes />} />
+          <Route path="orders" element={<AdminOrders />} />
           <Route path="snacks" element={<AdminSnacks />} />
           <Route path="users" element={<AdminUsers />} />
         </Route>
