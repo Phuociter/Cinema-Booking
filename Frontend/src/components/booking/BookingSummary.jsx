@@ -212,9 +212,6 @@ const BookingSummary = ({ showtimeId, cinemaId, selectedSeats = [], totalHoldPri
             <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
                 <span>🍿</span> Bắp Nước & Thanh Toán
             </h2>
-            <p className="text-slate-400 text-sm mb-4">
-                Chọn bắp nước từ menu cụm rạp, tính tổng tiền và thanh toán trực tiếp qua MoMo QR.
-            </p>
 
             {/* KHU VỰC HIỂN THỊ DANH SÁCH BẮP NƯỚC */}
             <div className="mb-6 space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
