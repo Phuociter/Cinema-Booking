@@ -49,3 +49,7 @@ Thumbs.db
 # --- Database Backups & Large Dumps ---
 data/backup_before_clerk_migration_20260925_164253.sql
 *.sql.bak
+
+# --- Temporary code backups ---
+*.bak_*
+_backup_genres_*/
