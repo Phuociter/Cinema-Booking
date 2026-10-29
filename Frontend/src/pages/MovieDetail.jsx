@@ -45,8 +45,17 @@ const MovieDetail = () => {
         setMovie(data);
 
         // Kiểm tra danh sách yêu thích trong localStorage
-        const favorites = JSON.parse(localStorage.getItem('yeuThichPhim')) || [];
-        setIsFavorite(favorites.some((f) => f.id === data.id || f._id === data.id));
+        let favorites = [];
+        try {
+          const stored = JSON.parse(localStorage.getItem('cinema_favorites') || '[]');
+          favorites = Array.isArray(stored) ? stored : [];
+        } catch {
+          favorites = [];
+        }
+        const currentMovieId = data.id ?? data._id;
+        setIsFavorite(favorites.some(
+          (item) => String(item.id ?? item._id) === String(currentMovieId)
+        ));
 
         // Nạp thêm danh sách phim gợi ý thật từ Backend
         try {
@@ -74,18 +83,36 @@ const MovieDetail = () => {
     };
   }, [id]);
 
-  // Toggle lưu phim yêu thích
+  // Toggle yêu thích và đồng bộ với các component khác
   const toggleFavorite = () => {
     if (!movie) return;
-    const favorites = JSON.parse(localStorage.getItem('yeuThichPhim')) || [];
-    let newFavorites;
-    if (isFavorite) {
-      newFavorites = favorites.filter((f) => f.id !== movie.id && f._id !== movie.id);
-    } else {
-      newFavorites = [...favorites, movie];
+
+    let favorites = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem('cinema_favorites') || '[]');
+      favorites = Array.isArray(stored) ? stored : [];
+    } catch {
+      favorites = [];
     }
-    localStorage.setItem('yeuThichPhim', JSON.stringify(newFavorites));
-    setIsFavorite(!isFavorite);
+
+    const movieId = movie.id ?? movie._id;
+    const alreadyFavorite = favorites.some(
+      (item) => String(item.id ?? item._id) === String(movieId)
+    );
+
+    const updatedFavorites = alreadyFavorite
+      ? favorites.filter(
+          (item) => String(item.id ?? item._id) !== String(movieId)
+        )
+      : [...favorites, movie];
+
+    try {
+      localStorage.setItem('cinema_favorites', JSON.stringify(updatedFavorites));
+      setIsFavorite(!alreadyFavorite);
+      window.dispatchEvent(new Event('cinema-favorites-updated'));
+    } catch (error) {
+      console.error('Không thể cập nhật danh sách yêu thích:', error);
+    }
   };
 
   // Trạng thái đang tải dữ liệu
