@@ -45,7 +45,9 @@ public class MovieActorDto
 
 public class MovieActorRequest
 {
-    public Guid ActorId { get; set; }
+    public Guid? ActorId { get; set; }
+    public string? Name { get; set; }
+    public string? ProfilePath { get; set; }
     public string? CharacterName { get; set; }
 }
 

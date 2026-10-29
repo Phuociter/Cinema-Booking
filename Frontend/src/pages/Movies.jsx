@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useEffect } from 'react';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { useSearchParams } from 'react-router-dom';
@@ -49,6 +49,7 @@ const Movies = () => {
     const [cinemasLoaded, setCinemasLoaded] = useState(false);
 
     const [loading, setLoading] = useState(true);
+    const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
     const [searchQuery, setSearchQuery] = useState(searchParam);
     const [selectedGenre, setSelectedGenre] = useState('all');
     const [selectedCity, setSelectedCity] = useState(cityParam);
@@ -208,6 +209,7 @@ const Movies = () => {
             } finally {
                 if (!cancelled) {
                     setLoading(false);
+                    setHasLoadedOnce(true);
                 }
             }
         };
@@ -405,7 +407,7 @@ const Movies = () => {
         });
     };
 
-    if (loading) {
+    if (loading && !hasLoadedOnce) {
         return (
             <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
                 <div className="max-w-7xl mx-auto">
