@@ -1,4 +1,4 @@
-
+﻿
 using Microsoft.EntityFrameworkCore;
 using MovieBooking.Data;
 using MovieBooking.Data.Entities;
@@ -611,4 +611,140 @@ public class MovieService : IMovieService
                 .ToList()
         };
     }
-}
+
+    public async Task<GenreMutationResult> CreateGenreAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return new GenreMutationResult
+            {
+                Error = "Tên thể loại không được để trống."
+            };
+        }
+
+        var duplicate = await _dbContext.Genres.AnyAsync(
+            genre => genre.Name.ToLower() == normalizedName.ToLower(),
+            cancellationToken);
+
+        if (duplicate)
+        {
+            return new GenreMutationResult
+            {
+                Conflict = true,
+                Error = "Tên thể loại đã tồn tại."
+            };
+        }
+
+        var genre = new Genre
+        {
+            Id = Guid.NewGuid(),
+            Name = normalizedName
+        };
+
+        _dbContext.Genres.Add(genre);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new GenreMutationResult
+        {
+            Genre = new GenreDto
+            {
+                Id = genre.Id,
+                Name = genre.Name
+            }
+        };
+    }
+
+    public async Task<GenreMutationResult> UpdateGenreAsync(
+        Guid id,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return new GenreMutationResult
+            {
+                Error = "Tên thể loại không được để trống."
+            };
+        }
+
+        var genre = await _dbContext.Genres.FirstOrDefaultAsync(
+            item => item.Id == id,
+            cancellationToken);
+
+        if (genre == null)
+        {
+            return new GenreMutationResult
+            {
+                NotFound = true,
+                Error = "Không tìm thấy thể loại."
+            };
+        }
+
+        var duplicate = await _dbContext.Genres.AnyAsync(
+            item => item.Id != id &&
+                    item.Name.ToLower() == normalizedName.ToLower(),
+            cancellationToken);
+
+        if (duplicate)
+        {
+            return new GenreMutationResult
+            {
+                Conflict = true,
+                Error = "Tên thể loại đã được sử dụng."
+            };
+        }
+
+        genre.Name = normalizedName;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new GenreMutationResult
+        {
+            Genre = new GenreDto
+            {
+                Id = genre.Id,
+                Name = genre.Name
+            }
+        };
+    }
+
+    public async Task<GenreMutationResult> DeleteGenreAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var genre = await _dbContext.Genres.FirstOrDefaultAsync(
+            item => item.Id == id,
+            cancellationToken);
+
+        if (genre == null)
+        {
+            return new GenreMutationResult
+            {
+                NotFound = true,
+                Error = "Không tìm thấy thể loại."
+            };
+        }
+
+        var isInUse = await _dbContext.MovieGenres.AnyAsync(
+            item => item.GenreId == id,
+            cancellationToken);
+
+        if (isInUse)
+        {
+            return new GenreMutationResult
+            {
+                Conflict = true,
+                Error = "Không thể xóa thể loại đang được gán cho phim. Hãy cập nhật thể loại của các phim liên quan trước."
+            };
+        }
+
+        _dbContext.Genres.Remove(genre);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new GenreMutationResult();
+    }}

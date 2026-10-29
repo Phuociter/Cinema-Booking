@@ -267,6 +267,12 @@ export default function AdminMovies() {
   const [deleteMovie, setDeleteMovie] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [activeTab, setActiveTab] = useState('movies');
+  const [genreName, setGenreName] = useState('');
+  const [editingGenre, setEditingGenre] = useState(null);
+  const [genreToDelete, setGenreToDelete] = useState(null);
+  const [savingGenre, setSavingGenre] = useState(false);
+  const [deletingGenre, setDeletingGenre] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => { setSearch(searchInput.trim()); setPage(1); }, 350);
@@ -351,16 +357,95 @@ export default function AdminMovies() {
     finally { setDeleting(false); }
   };
 
+  const saveGenre = async (event) => {
+    event.preventDefault();
+    const normalizedName = genreName.trim();
+
+    if (!normalizedName) {
+      toast.error('Vui lòng nhập tên thể loại.');
+      return;
+    }
+
+    setSavingGenre(true);
+    try {
+      if (editingGenre) {
+        await useMovies.updateGenre(idOf(editingGenre), { name: normalizedName });
+        toast.success('Đã cập nhật thể loại.');
+      } else {
+        await useMovies.createGenre({ name: normalizedName });
+        toast.success('Đã thêm thể loại mới.');
+      }
+
+      setGenreName('');
+      setEditingGenre(null);
+      await loadLookups();
+    } catch (error) {
+      toast.error(errorText(error));
+    } finally {
+      setSavingGenre(false);
+    }
+  };
+
+  const confirmDeleteGenre = async () => {
+    if (!genreToDelete) return;
+
+    setDeletingGenre(true);
+    try {
+      await useMovies.deleteGenre(idOf(genreToDelete));
+      toast.success('Đã xóa thể loại.');
+      setGenreToDelete(null);
+      if (editingGenre && idOf(editingGenre) === idOf(genreToDelete)) {
+        setEditingGenre(null);
+        setGenreName('');
+      }
+      await loadLookups();
+    } catch (error) {
+      toast.error(errorText(error));
+    } finally {
+      setDeletingGenre(false);
+    }
+  };
+
   const firstItem = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
   const lastItem = Math.min(page * pageSize, totalItems);
 
   return <main className="min-h-screen bg-[#080d1a] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
     <div className="mx-auto max-w-[1500px] space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div><div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[.22em] text-violet-300"><Film size={15} /> Cinema Admin / Catalog</div><h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Quản lý phim</h1><p className="mt-2 max-w-2xl text-sm text-slate-400">Quản lý danh mục phim, thông tin phát hành và thể loại trong một giao diện.</p></div>
-        <div className="flex flex-wrap gap-2"><button onClick={refresh} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.03] px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/[.08]"><RefreshCw size={16} /> Làm mới</button><button onClick={() => { setModalMovie(null); setCreateOpen(true); }} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-400"><Plus size={17} /> Thêm phim</button></div>
-      </header>
+  <div>
+    <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[.22em] text-violet-300">
+      <Film size={15} /> Cinema Admin / Catalog
+    </div>
+    <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">
+      {activeTab === 'movies' ? 'Quản lý phim' : 'Quản lý thể loại'}
+    </h1>
+    <p className="mt-2 max-w-2xl text-sm text-slate-400">
+      Quản lý danh mục phim và thể loại trong cùng một giao diện.
+    </p>
+  </div>
+  <div className="flex flex-wrap gap-2">
+    <button onClick={refresh} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.03] px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/[.08]">
+      <RefreshCw size={16} /> Làm mới
+    </button>
+    {activeTab === 'movies' && (
+      <button onClick={() => { setModalMovie(null); setCreateOpen(true); }} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-400">
+        <Plus size={17} /> Thêm phim
+      </button>
+    )}
+  </div>
+</header>
 
+<nav className="flex gap-2 rounded-2xl border border-white/[.08] bg-slate-900/60 p-1.5" aria-label="Danh mục quản lý">
+  <button type="button" onClick={() => setActiveTab('movies')} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition ${activeTab === 'movies' ? 'bg-violet-500 text-white shadow-lg shadow-violet-950/30' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}>
+    <Film size={16} /> Quản lý phim
+  </button>
+  <button type="button" onClick={() => setActiveTab('genres')} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition ${activeTab === 'genres' ? 'bg-violet-500 text-white shadow-lg shadow-violet-950/30' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}>
+    <SlidersHorizontal size={16} /> Quản lý thể loại
+    <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs">{genres.length}</span>
+  </button>
+</nav>
+
+            {activeTab === 'movies' && <>
       <section className="rounded-2xl border border-white/[.08] bg-slate-900/70 p-4 shadow-xl shadow-black/10 sm:p-5">
         <div className="mb-4 flex items-center gap-2"><SlidersHorizontal size={17} className="text-violet-300" /><h2 className="text-sm font-bold text-white">Bộ lọc nâng cao</h2><span className="text-xs text-slate-500">Tìm kiếm và thu hẹp kết quả</span></div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -409,9 +494,129 @@ export default function AdminMovies() {
         </div>
         <footer className="flex flex-col gap-3 border-t border-white/[.08] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p className="text-xs text-slate-500">Hiển thị <strong className="text-slate-300">{firstItem}–{lastItem}</strong> trên <strong className="text-slate-300">{totalItems}</strong> kết quả</p><div className="flex items-center justify-between gap-2 sm:justify-end"><button disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"><ChevronLeft size={16} /> Trước</button><span className="rounded-lg bg-white/[.05] px-3 py-2 text-xs font-semibold text-slate-300">Trang {page} / {Math.max(1, totalPages)}</span><button disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30">Sau <ChevronRight size={16} /></button></div></footer>
       </section>
+            </>}
+      {activeTab === 'genres' && (
+        <section className="overflow-hidden rounded-2xl border border-white/[.08] bg-slate-900/70 shadow-xl shadow-black/10">
+          <div className="border-b border-white/[.08] p-5 sm:p-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[.2em] text-violet-300">Movie catalog</p>
+                <h2 className="mt-1 text-xl font-black text-white">Danh mục thể loại</h2>
+                <p className="mt-1 text-sm text-slate-400">Thêm, đổi tên hoặc xóa thể loại phim.</p>
+              </div>
+              <div className="rounded-xl border border-violet-300/15 bg-violet-400/5 px-4 py-3">
+                <p className="text-xs text-slate-400">Tổng số thể loại</p>
+                <p className="mt-1 text-2xl font-black text-violet-200">{genres.length}</p>
+              </div>
+            </div>
+          </div>
+
+          <form onSubmit={saveGenre} className="border-b border-white/[.08] bg-slate-950/30 p-5 sm:p-6">
+            <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+              <label>
+                <span className={labelClass}>{editingGenre ? 'Tên thể loại cần cập nhật' : 'Tên thể loại mới'} *</span>
+                <input
+                  className={`${inputClass} mt-1.5`}
+                  value={genreName}
+                  onChange={(event) => setGenreName(event.target.value)}
+                  placeholder="Ví dụ: Hành động, Hài, Tình cảm..."
+                  maxLength={100}
+                  required
+                />
+                <span className="mt-1.5 block text-xs text-slate-500">Tên thể loại không được để trống.</span>
+              </label>
+              <div className="flex gap-2">
+                <button type="submit" disabled={savingGenre} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-60">
+                  {savingGenre ? <LoaderCircle size={16} className="animate-spin" /> : <Plus size={16} />}
+                  {savingGenre ? 'Đang lưu...' : editingGenre ? 'Lưu thay đổi' : 'Thêm thể loại'}
+                </button>
+                {editingGenre && (
+                  <button type="button" onClick={() => { setEditingGenre(null); setGenreName(''); }} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/5">
+                    Hủy
+                  </button>
+                )}
+              </div>
+            </div>
+          </form>
+
+          <div className="border-b border-white/[.06] px-5 py-3 text-xs text-slate-500">
+            Danh sách được đồng bộ từ API thể loại.
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[540px] text-left">
+              <thead>
+                <tr className="border-b border-white/[.08] bg-white/[.025] text-[11px] uppercase tracking-wider text-slate-500">
+                  <th className="px-5 py-4 font-semibold">Tên thể loại</th>
+                  <th className="px-5 py-4 font-semibold">Mã định danh</th>
+                  <th className="px-5 py-4 text-right font-semibold">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[.06]">
+                {genres.map((item) => (
+                  <tr key={idOf(item)} className="transition hover:bg-white/[.025]">
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-violet-300/15 bg-violet-400/10 text-sm font-black text-violet-200">
+                          {nameOf(item).trim().charAt(0).toUpperCase() || '?'}
+                        </span>
+                        <span className="font-semibold text-slate-100">{nameOf(item)}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 font-mono text-xs text-slate-500">{idOf(item) || '—'}</td>
+                    <td className="px-5 py-4">
+                      <div className="flex justify-end gap-2">
+                        <button type="button" title="Sửa thể loại" onClick={() => { setEditingGenre(item); setGenreName(nameOf(item)); }} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300/20 px-3 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-400/10">
+                          <Pencil size={14} /> Sửa
+                        </button>
+                        <button type="button" title="Xóa thể loại" onClick={() => setGenreToDelete(item)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/20 px-3 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-400/10">
+                          <Trash2 size={14} /> Xóa
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {genres.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-14 text-center">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5 text-slate-500">
+                        <SlidersHorizontal size={22} />
+                      </div>
+                      <p className="mt-3 font-semibold text-slate-300">Chưa có thể loại nào</p>
+                      <p className="mt-1 text-sm text-slate-500">Thêm thể loại đầu tiên bằng biểu mẫu phía trên.</p>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <p className="text-center text-xs text-slate-600">Cinema Booking · Movie Management</p>
     </div>
-    {(createOpen || modalMovie) && <MovieModal key={modalMovie ? idOf(modalMovie) : 'create'} movie={modalMovie} genres={genres} onClose={() => { setCreateOpen(false); setModalMovie(null); }} onSave={saveMovie} />}
+      {genreToDelete && (
+    <ModalShell title="Xóa thể loại?" eyebrow="Xác nhận thao tác" onClose={() => setGenreToDelete(null)}>
+      <div className="p-5 sm:p-6">
+        <div className="flex gap-3 rounded-xl border border-rose-400/20 bg-rose-400/5 p-4">
+          <AlertCircle className="mt-0.5 shrink-0 text-rose-300" size={21} />
+          <div className="text-sm leading-6 text-slate-300">
+            <p>Bạn đang yêu cầu xóa thể loại <strong className="text-white">{nameOf(genreToDelete)}</strong>.</p>
+            <p className="mt-1 text-slate-400">Nếu thể loại đang được phim sử dụng, API có thể từ chối thao tác này.</p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button type="button" onClick={() => setGenreToDelete(null)} disabled={deletingGenre} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/5">
+            Hủy
+          </button>
+          <button type="button" onClick={confirmDeleteGenre} disabled={deletingGenre} className="inline-flex items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-60">
+            {deletingGenre && <LoaderCircle size={16} className="animate-spin" />}
+            Xác nhận xóa
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  )}
+  {(createOpen || modalMovie) && <MovieModal key={modalMovie ? idOf(modalMovie) : 'create'} movie={modalMovie} genres={genres} onClose={() => { setCreateOpen(false); setModalMovie(null); }} onSave={saveMovie} />}
     {deleteMovie && <DeleteModal movie={deleteMovie} onClose={() => !deleting && setDeleteMovie(null)} onConfirm={confirmDelete} deleting={deleting} />}
   </main>;
 }
