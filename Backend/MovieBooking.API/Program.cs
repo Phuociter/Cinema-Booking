@@ -65,6 +65,9 @@ builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepositor
 builder.Services.AddScoped<IShowtimeRepository, ShowtimeRepository>();
 builder.Services.AddScoped<IShowtimeSeatRepository, ShowtimeSeatRepository>();
 builder.Services.AddScoped<IBookingRepository, BookingRepository>();
+builder.Services.AddScoped<IMovieRepository, MovieRepository>();
+builder.Services.AddScoped<IGenreRepository, GenreRepository>();
+builder.Services.AddScoped<IActorRepository, ActorRepository>();
 
 // 5. Register Redis Cache (Singleton)
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
@@ -78,6 +81,7 @@ builder.Services.AddSingleton<IRedisService, RedisService>();
 
 // 6. Register Application Services
 builder.Services.AddScoped<IMovieService, MovieService>();
+builder.Services.AddScoped<IActorService, ActorService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
 builder.Services.AddScoped<IShowtimeSeatService, ShowtimeSeatService>();
 builder.Services.AddScoped<ISnackService, SnackService>();
@@ -170,12 +174,13 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
-using (var scope = builder.Services.BuildServiceProvider().CreateScope())
+var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 }
-var app = builder.Build();
 
 // Configure HTTP request pipeline
 var avatarStoragePath = Path.Combine(
