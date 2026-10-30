@@ -7,3 +7,5 @@ export { default as useBookings } from './useBookings';
 export { default as useSnacks } from './useSnacks';
 export { default as usePayments } from './usePayments';
 export { default as useAdminDashboard } from './useAdminDashboard';
+
+export { default as useActors } from './useActors';

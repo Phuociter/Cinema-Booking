@@ -16,6 +16,7 @@ public class MovieDto
     public string Status { get; set; } = string.Empty;
     public List<string> Genres { get; set; } = new();
     public List<string> Directors { get; set; } = new();
+    public List<Guid> DirectorIds { get; set; } = new();
     public List<MovieActorDto> Actors { get; set; } = new();
 }
 
@@ -71,4 +72,3 @@ public class CreateMovieRequest
 public class UpdateMovieRequest : CreateMovieRequest
 {
 }
-

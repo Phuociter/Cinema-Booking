@@ -1,4 +1,4 @@
-﻿using MovieBooking.Data.Entities;
+using MovieBooking.Data.Entities;
 using MovieBooking.Data.Repositories.Interfaces;
 using MovieBooking.Service.DTOs;
 
@@ -393,6 +393,10 @@ public class MovieService : IMovieService
             Directors = movie.MovieDirectors
                 .OrderBy(relation => relation.Director.Name)
                 .Select(relation => relation.Director.Name)
+                .ToList(),
+
+            DirectorIds = movie.MovieDirectors
+                .Select(relation => relation.DirectorId)
                 .ToList(),
 
             Actors = movie.MovieActors
