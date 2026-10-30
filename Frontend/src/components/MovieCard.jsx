@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Trash2, Heart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
@@ -114,9 +114,11 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
                 <img
                     src={posterSrc}
                     onError={(event) => {
-                        event.target.onerror = null;
-                        event.target.src =
-                            'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500';
+                        const image = event.currentTarget;
+                        image.onerror = null;
+                        if (!image.src.endsWith('/backgroundImage.png')) {
+                            image.src = '/backgroundImage.png';
+                        }
                     }}
                     alt={`${movie.title || 'Movie'} poster`}
                     loading="lazy"
