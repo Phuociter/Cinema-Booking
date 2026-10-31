@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using MovieBooking.Service.Services;
-
+using Microsoft.AspNetCore.Authorization;
+using MovieBooking.Service.DTOs;
 namespace MovieBooking.API.Controllers;
 
 [ApiController]
@@ -48,5 +49,47 @@ public class CinemasController : ControllerBase
         var seats = await _cinemaService.GetSeatsByAuditoriumIdAsync(id);
 
         return Ok(seats);
+    }
+        // ----- ADMIN CRUD -----
+    [Authorize(Roles = "Admin")]
+    [HttpPost("cinemas")]
+    public async Task<IActionResult> CreateCinema([FromBody] CinemaUpsertRequest request)
+        => await Run(async () => Ok(await _cinemaService.CreateCinemaAsync(request)));
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("cinemas/{id:guid}")]
+    public async Task<IActionResult> UpdateCinema(Guid id, [FromBody] CinemaUpsertRequest request)
+        => await Run(async () => await _cinemaService.UpdateCinemaAsync(id, request) is { } r
+            ? Ok(r) : NotFound(new { message = "Không tìm thấy rạp." }));
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("cinemas/{id:guid}")]
+    public async Task<IActionResult> DeleteCinema(Guid id)
+        => await Run(async () => await _cinemaService.DeleteCinemaAsync(id)
+            ? NoContent() : NotFound(new { message = "Không tìm thấy rạp." }));
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("cinemas/{cinemaId:guid}/auditoriums")]
+    public async Task<IActionResult> CreateAuditorium(Guid cinemaId, [FromBody] AuditoriumUpsertRequest request)
+        => await Run(async () => await _cinemaService.CreateAuditoriumAsync(cinemaId, request) is { } r
+            ? Ok(r) : NotFound(new { message = "Không tìm thấy rạp." }));
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("auditoriums/{id:guid}")]
+    public async Task<IActionResult> UpdateAuditorium(Guid id, [FromBody] AuditoriumUpsertRequest request)
+        => await Run(async () => await _cinemaService.UpdateAuditoriumAsync(id, request) is { } r
+            ? Ok(r) : NotFound(new { message = "Không tìm thấy phòng chiếu." }));
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("auditoriums/{id:guid}")]
+    public async Task<IActionResult> DeleteAuditorium(Guid id)
+        => await Run(async () => await _cinemaService.DeleteAuditoriumAsync(id)
+            ? NoContent() : NotFound(new { message = "Không tìm thấy phòng chiếu." }));
+
+    // Lỗi nghiệp vụ -> 400 kèm message tiếng Việt (axiosInstance sẽ đọc field "message")
+    private static async Task<IActionResult> Run(Func<Task<IActionResult>> action)
+    {
+        try { return await action(); }
+        catch (InvalidOperationException ex) { return new BadRequestObjectResult(new { message = ex.Message }); }
     }
 }

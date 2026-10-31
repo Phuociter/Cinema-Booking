@@ -8,6 +8,7 @@ public class CinemaDto
     public string? City { get; set; }
     public string? Hotline { get; set; }
     public string? ImageUrl { get; set; }
+    public int ActiveMovieCountThisMonth { get; set; }
     public List<AuditoriumDto> Auditoriums { get; set; } = new();
 }
 
@@ -19,4 +20,22 @@ public class AuditoriumDto
     public string HallType { get; set; } = "2D";
     public int? TotalRows { get; set; }
     public int? TotalColumns { get; set; }
+    public int ActiveMovieCountThisMonth { get; set; }
+}
+
+public class CinemaUpsertRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string? City { get; set; }
+    public string? Address { get; set; }
+    public string? Hotline { get; set; }
+    public string? ImageUrl { get; set; }
+}
+
+public class AuditoriumUpsertRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string HallType { get; set; } = "2D";
+    public int TotalRows { get; set; }
+    public int TotalColumns { get; set; }
 }
