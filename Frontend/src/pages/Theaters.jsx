@@ -13,9 +13,13 @@ import {
   Building2,
   AlertCircle,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import BlurCircle from '../components/BlurCircle';
+
+const PAGE_SIZE = 12;
 
 const Theaters = () => {
   const navigate = useNavigate();
@@ -26,6 +30,7 @@ const Theaters = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCity, setSelectedCity] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Gọi API lấy danh sách cụm rạp
   const fetchCinemas = useCallback(async () => {
@@ -45,6 +50,11 @@ const Theaters = () => {
   useEffect(() => {
     fetchCinemas();
   }, [fetchCinemas]);
+
+  // Về trang 1 khi đổi thành phố hoặc từ khóa tìm kiếm
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCity]);
 
   // Trích xuất danh sách thành phố duy nhất
   const uniqueCities = useMemo(() => {
@@ -71,6 +81,32 @@ const Theaters = () => {
       return matchCity && matchSearch;
     });
   }, [theaters, selectedCity, searchQuery]);
+
+  // Phân trang
+  const totalItems = filteredTheaters.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+
+  const pagedTheaters = useMemo(
+    () => filteredTheaters.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filteredTheaters, safePage]
+  );
+
+  const fromItem = totalItems === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const toItem = Math.min(safePage * PAGE_SIZE, totalItems);
+
+  const pageItems = useMemo(() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    if (safePage <= 4) return [1, 2, 3, 4, 5, '...', totalPages];
+    if (safePage >= totalPages - 3)
+      return [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    return [1, '...', safePage - 1, safePage, safePage + 1, '...', totalPages];
+  }, [totalPages, safePage]);
+
+  const goToPage = (page) => {
+    setCurrentPage(Math.min(Math.max(1, page), totalPages));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-white pt-24 pb-16 px-4 sm:px-6 relative overflow-hidden">
@@ -188,83 +224,146 @@ const Theaters = () => {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredTheaters.map((theater) => {
-              const halls = theater.auditoriums || [];
-              const hallTypes = Array.from(new Set(halls.map((h) => h.hallType).filter(Boolean)));
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {pagedTheaters.map((theater) => {
+                const halls = theater.auditoriums || [];
+                const hallTypes = Array.from(new Set(halls.map((h) => h.hallType).filter(Boolean)));
 
-              return (
-                <div
-                  key={theater.id}
-                  className="bg-slate-900/80 border border-white/10 hover:border-white/20 rounded-2xl p-4 shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col justify-between backdrop-blur-sm group"
-                >
-                  <div>
-                    {/* Hình ảnh rạp */}
-                    <div className="relative h-44 rounded-xl overflow-hidden mb-3 bg-slate-950">
-                      <img
-                        src={theater.imageUrl || 'https://picsum.photos/seed/cinema/800/500'}
-                        alt={theater.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        loading="lazy"
-                        onError={(e) => {
-                          e.target.onerror = null;
-                          e.target.src = 'https://picsum.photos/seed/cinema/800/500';
-                        }}
-                      />
-                      <div className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-black/60 backdrop-blur-md text-emerald-400 border border-white/10">
-                        {theater.city || 'Việt Nam'}
-                      </div>
-                    </div>
-
-                    {/* Thông tin rạp */}
-                    <h3 className="font-bold text-white text-base mb-1.5 line-clamp-1 group-hover:text-red-400 transition-colors">
-                      {theater.name}
-                    </h3>
-
-                    <p className="text-xs text-slate-400 mb-2 flex items-start gap-1.5 line-clamp-2">
-                      <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
-                      <span>{theater.address}</span>
-                    </p>
-
-                    {theater.hotline && (
-                      <p className="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
-                        <Phone className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                        <span>Hotline: {theater.hotline}</span>
-                      </p>
-                    )}
-
-                    {/* Danh sách phòng chiếu / Định dạng */}
-                    <div className="bg-slate-950/60 border border-white/5 rounded-xl p-2.5 mb-4 text-xs">
-                      <div className="text-slate-400 flex items-center justify-between mb-1">
-                        <span>Số phòng chiếu:</span>
-                        <span className="font-bold text-white">{halls.length} phòng</span>
-                      </div>
-                      {hallTypes.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {hallTypes.map((type) => (
-                            <span
-                              key={type}
-                              className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/10 text-slate-300 border border-white/10"
-                            >
-                              {type}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Nút hành động */}
-                  <button
-                    onClick={() => navigate('/movies')}
-                    className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-xl font-bold text-xs shadow-md shadow-red-600/30 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                return (
+                  <div
+                    key={theater.id}
+                    className="bg-slate-900/80 border border-white/10 hover:border-white/20 rounded-2xl p-4 shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col justify-between backdrop-blur-sm group"
                   >
-                    <Film className="w-3.5 h-3.5" /> Xem Phim & Suất Chiếu
+                    <div>
+                      {/* Hình ảnh rạp */}
+                      <div className="relative h-44 rounded-xl overflow-hidden mb-3 bg-slate-950">
+                        <img
+                          src={theater.imageUrl || 'https://picsum.photos/seed/cinema/800/500'}
+                          alt={theater.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          loading="lazy"
+                          onError={(e) => {
+                            e.target.onerror = null;
+                            e.target.src = 'https://picsum.photos/seed/cinema/800/500';
+                          }}
+                        />
+                        <div className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-black/60 backdrop-blur-md text-emerald-400 border border-white/10">
+                          {theater.city || 'Việt Nam'}
+                        </div>
+                      </div>
+
+                      {/* Thông tin rạp */}
+                      <h3 className="font-bold text-white text-base mb-1.5 line-clamp-1 group-hover:text-red-400 transition-colors">
+                        {theater.name}
+                      </h3>
+
+                      <p className="text-xs text-slate-400 mb-2 flex items-start gap-1.5 line-clamp-2">
+                        <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                        <span>{theater.address}</span>
+                      </p>
+
+                      {theater.hotline && (
+                        <p className="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span>Hotline: {theater.hotline}</span>
+                        </p>
+                      )}
+
+                      {/* Danh sách phòng chiếu / Định dạng */}
+                      <div className="bg-slate-950/60 border border-white/5 rounded-xl p-2.5 mb-4 text-xs">
+                        <div className="text-slate-400 flex items-center justify-between mb-1">
+                          <span>Số phòng chiếu:</span>
+                          <span className="font-bold text-white">{halls.length} phòng</span>
+                        </div>
+                        {hallTypes.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {hallTypes.map((type) => (
+                              <span
+                                key={type}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/10 text-slate-300 border border-white/10"
+                              >
+                                {type}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Nút hành động */}
+                    <button
+                      onClick={() => {
+                             
+                        window.scrollTo({ top: 0, behavior: 'instant' });
+                        const params = new URLSearchParams();
+                        params.set('cinemaId', theater.id);
+                        if (theater.city) params.set('city', theater.city.trim());
+                        navigate(`/movies?${params.toString()}`);
+
+                      }}
+                      className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-xl font-bold text-xs shadow-md shadow-red-600/30 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Film className="w-3.5 h-3.5" /> Xem Phim & Suất Chiếu
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Phân trang */}
+            <nav
+              aria-label="Phân trang danh sách rạp"
+              className="mt-10 flex flex-col items-center gap-3"
+            >
+              <p className="text-xs text-slate-400">
+                Hiển thị {fromItem}-{toItem} trên tổng số {totalItems} rạp
+              </p>
+
+              {totalPages > 1 && (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => goToPage(safePage - 1)}
+                    disabled={safePage <= 1}
+                    className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-sm text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Trước
+                  </button>
+
+                  {pageItems.map((item, idx) =>
+                    item === '...' ? (
+                      <span key={`dots-${idx}`} className="px-1 text-slate-500 select-none">…</span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => goToPage(item)}
+                        aria-current={item === safePage ? 'page' : undefined}
+                        className={
+                          'min-w-10 px-3 py-2 rounded-lg border text-sm transition cursor-pointer ' +
+                          (item === safePage
+                            ? 'bg-red-500 border-red-500 text-white font-semibold'
+                            : 'border-white/10 text-slate-300 hover:bg-white/10')
+                        }
+                      >
+                        {item}
+                      </button>
+                    )
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => goToPage(safePage + 1)}
+                    disabled={safePage >= totalPages}
+                    className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-sm text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
+                  >
+                    Sau <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-              );
-            })}
-          </div>
+              )}
+            </nav>
+          </>
         )}
       </div>
     </div>
