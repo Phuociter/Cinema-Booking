@@ -1,6 +1,5 @@
-using Microsoft.EntityFrameworkCore;
-using MovieBooking.Data;
 using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories;
 using MovieBooking.Service.DTOs;
 
 namespace MovieBooking.Service.Services;
@@ -8,82 +7,42 @@ namespace MovieBooking.Service.Services;
 public class CinemaService : ICinemaService
 {
     private static readonly string[] HallTypes = { "2D", "3D", "IMAX", "GOLDCLASS" };
-    private readonly AppDbContext _context;
+    private readonly ICinemaRepository _repo;
 
-    public CinemaService(AppDbContext context) => _context = context;
+    public CinemaService(ICinemaRepository repo) => _repo = repo;
 
     // ---------- READ ----------
     public async Task<List<CinemaDto>> GetCinemasAsync(string? city = null)
     {
-        var query = _context.Cinemas.AsQueryable();
-        if (!string.IsNullOrWhiteSpace(city))
-            query = query.Where(c => c.City == city);
-
-        var cinemas = await query
-            .OrderBy(c => c.Name)
-            .Select(c => new CinemaDto
-            {
-                Id = c.Id, Name = c.Name, Address = c.Address, City = c.City,
-                Hotline = c.Hotline, ImageUrl = c.ImageUrl,
-                Auditoriums = c.Auditoriums.OrderBy(a => a.Name).Select(a => new AuditoriumDto
-                {
-                    Id = a.Id, CinemaId = a.CinemaId, Name = a.Name, HallType = a.HallType,
-                    TotalRows = a.TotalRows, TotalColumns = a.TotalColumns
-                }).ToList()
-            })
-            .ToListAsync();
-
-        await FillMonthlyStatsAsync(cinemas);
-        return cinemas;
+        var dtos = (await _repo.GetCinemasAsync(city)).Select(ToDto).ToList();
+        await FillMonthlyStatsAsync(dtos);
+        return dtos;
     }
 
     public async Task<CinemaDto?> GetCinemaByIdAsync(Guid id)
     {
-        var cinema = await _context.Cinemas
-            .Where(c => c.Id == id)
-            .Select(c => new CinemaDto
-            {
-                Id = c.Id, Name = c.Name, Address = c.Address, City = c.City,
-                Hotline = c.Hotline, ImageUrl = c.ImageUrl,
-                Auditoriums = c.Auditoriums.OrderBy(a => a.Name).Select(a => new AuditoriumDto
-                {
-                    Id = a.Id, CinemaId = a.CinemaId, Name = a.Name, HallType = a.HallType,
-                    TotalRows = a.TotalRows, TotalColumns = a.TotalColumns
-                }).ToList()
-            })
-            .FirstOrDefaultAsync();
-
-        if (cinema != null) await FillMonthlyStatsAsync(new List<CinemaDto> { cinema });
-        return cinema;
+        var cinema = await _repo.GetCinemaByIdAsync(id);
+        if (cinema == null) return null;
+        var dto = ToDto(cinema);
+        await FillMonthlyStatsAsync(new List<CinemaDto> { dto });
+        return dto;
     }
 
     public async Task<List<SeatDto>> GetSeatsByAuditoriumIdAsync(Guid auditoriumId)
     {
-        return await _context.Seats
-            .Include(s => s.SeatType)
-            .Where(s => s.AuditoriumId == auditoriumId)
-            .Select(s => new SeatDto
-            {
-                Id = s.Id, AuditoriumId = s.AuditoriumId, Row = s.RowLabel,
-                Number = s.ColumnNumber, SeatType = s.SeatType.Name
-            })
-            .ToListAsync();
+        var seats = await _repo.GetSeatsByAuditoriumIdAsync(auditoriumId);
+        return seats.Select(s => new SeatDto
+        {
+            Id = s.Id, AuditoriumId = s.AuditoriumId, Row = s.RowLabel,
+            Number = s.ColumnNumber, SeatType = s.SeatType.Name
+        }).ToList();
     }
 
-    // Thống kê: số phim KHÁC NHAU có suất chiếu (chưa hủy) trong tháng hiện tại. Chỉ 1 truy vấn.
     private async Task FillMonthlyStatsAsync(List<CinemaDto> cinemas)
     {
         if (cinemas.Count == 0) return;
-
         var now = DateTime.UtcNow;
-        var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var to = from.AddMonths(1);
-
-        var rows = await _context.Showtimes
-            .Where(s => s.StartTime >= from && s.StartTime < to && s.Status != "cancelled")
-            .Select(s => new { s.AuditoriumId, s.Auditorium.CinemaId, s.MovieId })
-            .Distinct()
-            .ToListAsync();
+        var rows = await _repo.GetActiveMovieRowsAsync(now.Month, now.Year);
 
         var perAuditorium = rows.GroupBy(r => r.AuditoriumId).ToDictionary(g => g.Key, g => g.Count());
         var perCinema = rows.GroupBy(r => r.CinemaId)
@@ -107,15 +66,14 @@ public class CinemaService : ICinemaService
             Address = r.Address?.Trim(), Hotline = r.Hotline?.Trim(),
             ImageUrl = r.ImageUrl?.Trim(), CreatedAt = DateTime.UtcNow
         };
-        _context.Cinemas.Add(cinema);
-        await _context.SaveChangesAsync();
+        await _repo.AddCinemaAsync(cinema);
         return ToDto(cinema);
     }
 
     public async Task<CinemaDto?> UpdateCinemaAsync(Guid id, CinemaUpsertRequest r)
     {
         ValidateCinema(r);
-        var cinema = await _context.Cinemas.FirstOrDefaultAsync(c => c.Id == id);
+        var cinema = await _repo.GetCinemaByIdAsync(id, track: true);
         if (cinema == null) return null;
 
         cinema.Name = r.Name.Trim();
@@ -123,24 +81,19 @@ public class CinemaService : ICinemaService
         cinema.Address = r.Address?.Trim();
         cinema.Hotline = r.Hotline?.Trim();
         cinema.ImageUrl = r.ImageUrl?.Trim();
-        await _context.SaveChangesAsync();
+        await _repo.UpdateCinemaAsync(cinema);
         return ToDto(cinema);
     }
 
     public async Task<bool> DeleteCinemaAsync(Guid id)
     {
-        var cinema = await _context.Cinemas.Include(c => c.Auditoriums).FirstOrDefaultAsync(c => c.Id == id);
+        var cinema = await _repo.GetCinemaByIdAsync(id, track: true);
         if (cinema == null) return false;
 
-        var now = DateTime.UtcNow;
-        var hasUpcoming = await _context.Showtimes.AnyAsync(s =>
-            s.Auditorium.CinemaId == id && s.StartTime > now && s.Status != "cancelled");
-        if (hasUpcoming)
+        if (await _repo.CinemaHasUpcomingShowtimesAsync(id, DateTime.UtcNow))
             throw new InvalidOperationException("Rạp còn suất chiếu sắp tới. Hãy hủy các suất chiếu trước khi xóa rạp.");
 
-        cinema.DeletedAt = now;
-        foreach (var a in cinema.Auditoriums) a.DeletedAt ??= now;
-        await _context.SaveChangesAsync();
+        await _repo.DeleteCinemaAsync(cinema);
         return true;
     }
 
@@ -148,58 +101,59 @@ public class CinemaService : ICinemaService
     public async Task<AuditoriumDto?> CreateAuditoriumAsync(Guid cinemaId, AuditoriumUpsertRequest r)
     {
         ValidateAuditorium(r);
-        if (!await _context.Cinemas.AnyAsync(c => c.Id == cinemaId)) return null;
-        await EnsureUniqueAuditoriumName(cinemaId, r.Name, null);
+        if (!await _repo.CinemaExistsAsync(cinemaId)) return null;
+        if (await _repo.AuditoriumNameExistsAsync(cinemaId, r.Name, null))
+            throw new InvalidOperationException("Tên phòng đã tồn tại trong rạp này.");
 
         var a = new Auditorium
         {
             Id = Guid.NewGuid(), CinemaId = cinemaId, Name = r.Name.Trim(),
             HallType = r.HallType, TotalRows = r.TotalRows, TotalColumns = r.TotalColumns
         };
-        _context.Auditoriums.Add(a);
-        await _context.SaveChangesAsync();
+        await _repo.AddAuditoriumAsync(a);
         return ToDto(a);
     }
 
     public async Task<AuditoriumDto?> UpdateAuditoriumAsync(Guid id, AuditoriumUpsertRequest r)
     {
         ValidateAuditorium(r);
-        var a = await _context.Auditoriums.FirstOrDefaultAsync(x => x.Id == id);
+        var a = await _repo.GetAuditoriumByIdAsync(id);
         if (a == null) return null;
-        await EnsureUniqueAuditoriumName(a.CinemaId, r.Name, id);
+        if (await _repo.AuditoriumNameExistsAsync(a.CinemaId, r.Name, id))
+            throw new InvalidOperationException("Tên phòng đã tồn tại trong rạp này.");
 
         var sizeChanged = a.TotalRows != r.TotalRows || a.TotalColumns != r.TotalColumns;
-        if (sizeChanged && await _context.Seats.AnyAsync(s => s.AuditoriumId == id))
+        if (sizeChanged && await _repo.AuditoriumHasSeatsAsync(id))
             throw new InvalidOperationException("Phòng đã có sơ đồ ghế, không thể đổi số hàng/cột.");
 
         a.Name = r.Name.Trim();
         a.HallType = r.HallType;
         a.TotalRows = r.TotalRows;
         a.TotalColumns = r.TotalColumns;
-        await _context.SaveChangesAsync();
+        await _repo.UpdateAuditoriumAsync(a);
         return ToDto(a);
     }
 
     public async Task<bool> DeleteAuditoriumAsync(Guid id)
     {
-        var a = await _context.Auditoriums.FirstOrDefaultAsync(x => x.Id == id);
+        var a = await _repo.GetAuditoriumByIdAsync(id);
         if (a == null) return false;
 
-        var now = DateTime.UtcNow;
-        if (await _context.Showtimes.AnyAsync(s => s.AuditoriumId == id && s.StartTime > now && s.Status != "cancelled"))
+        if (await _repo.AuditoriumHasUpcomingShowtimesAsync(id, DateTime.UtcNow))
             throw new InvalidOperationException("Phòng còn suất chiếu sắp tới. Hãy hủy các suất chiếu trước khi xóa phòng.");
 
-        a.DeletedAt = now;
-        await _context.SaveChangesAsync();
+        await _repo.DeleteAuditoriumAsync(a);
         return true;
     }
 
-    // ---------- helpers ----------
+    // ---------- Validate ----------
     private static void ValidateCinema(CinemaUpsertRequest r)
     {
         if (string.IsNullOrWhiteSpace(r.Name)) throw new InvalidOperationException("Tên rạp không được để trống.");
         if (string.IsNullOrWhiteSpace(r.City)) throw new InvalidOperationException("Vui lòng nhập tỉnh/thành.");
         if (string.IsNullOrWhiteSpace(r.Address)) throw new InvalidOperationException("Vui lòng nhập địa chỉ.");
+        if (!string.IsNullOrWhiteSpace(r.Hotline) && !System.Text.RegularExpressions.Regex.IsMatch(r.Hotline.Trim(), @"^[0-9+\-\s().]{6,20}$"))
+            throw new InvalidOperationException("Hotline không hợp lệ.");
     }
 
     private static void ValidateAuditorium(AuditoriumUpsertRequest r)
@@ -210,18 +164,12 @@ public class CinemaService : ICinemaService
         if (r.TotalColumns is < 1 or > 30) throw new InvalidOperationException("Số cột ghế phải từ 1 đến 30.");
     }
 
-    private async Task EnsureUniqueAuditoriumName(Guid cinemaId, string name, Guid? excludeId)
-    {
-        var n = name.Trim().ToLower();
-        var exists = await _context.Auditoriums.AnyAsync(a =>
-            a.CinemaId == cinemaId && a.Id != excludeId && a.Name.ToLower() == n);
-        if (exists) throw new InvalidOperationException("Tên phòng đã tồn tại trong rạp này.");
-    }
-
+    // ---------- Mapping ----------
     private static CinemaDto ToDto(Cinema c) => new()
     {
         Id = c.Id, Name = c.Name, Address = c.Address, City = c.City,
-        Hotline = c.Hotline, ImageUrl = c.ImageUrl
+        Hotline = c.Hotline, ImageUrl = c.ImageUrl,
+        Auditoriums = c.Auditoriums.OrderBy(a => a.Name).Select(ToDto).ToList()
     };
 
     private static AuditoriumDto ToDto(Auditorium a) => new()
