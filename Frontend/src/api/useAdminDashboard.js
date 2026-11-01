@@ -1,14 +1,8 @@
-import usePayments from './usePayments';
-import useMovies from './useMovies';
-import useCinemas from './useCinemas';
-
-/**
- * API Module: Admin Dashboard Aggregator (Phụ trách: Dev E chủ trì, kết nối API Dev A & Dev B)
- * Tổng hợp toàn bộ dữ liệu thống kê doanh thu, phim ăn khách và tỷ lệ lấp đầy ghế cho Dashboard
- */
+import axiosInstance from './axiosInstance';
 
 export const useAdminDashboard = {
-
+  getOverview: (params) => axiosInstance.get('/reports/overview', { params }),
+  getTopMovies: (params) => axiosInstance.get('/reports/top-movies', { params }),
 };
 
 export default useAdminDashboard;

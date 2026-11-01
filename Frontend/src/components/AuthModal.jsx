@@ -5,6 +5,8 @@ import { useClerk, useAuth as useClerkAuth } from '@clerk/clerk-react';
 import ForgotPasswordForm from './ForgotPasswordForm';
 
 const IS_CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VIETNAM_PHONE_PATTERN = /^(03|05|07|08|09)\d{8}$/;
 
 function ClerkAuthSection({ isLogin, onClose, setError }) {
   const { loginWithClerk, isAuthenticated } = useAuth();
@@ -141,7 +143,13 @@ function ClerkAuthSection({ isLogin, onClose, setError }) {
 export default function AuthModal({ mode, onClose }) {
   const { login, register, isAuthenticated } = useAuth();
   const [authMode, setAuthMode] = useState(mode === 'register' ? 'register' : 'login');
-  const [form, setForm] = useState({ fullName: '', email: '', password: '', phone: '' });
+  const [form, setForm] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    phone: '',
+  });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isLogin = authMode === 'login';
@@ -161,16 +169,38 @@ export default function AuthModal({ mode, onClose }) {
     event.preventDefault();
     setError('');
 
-    if (!isLogin && form.password.length < 6) {
-      setError('Mật khẩu phải có tối thiểu 6 ký tự');
+    if (!EMAIL_PATTERN.test(form.email.trim())) {
+      setError('Vui lòng nhập địa chỉ email hợp lệ.');
+      return;
+    }
+
+    if (form.password.length < 6) {
+      setError('Mật khẩu phải có tối thiểu 6 ký tự.');
+      return;
+    }
+
+    if (!isLogin && form.password !== form.confirmPassword) {
+      setError('Mật khẩu nhập lại không khớp.');
+      return;
+    }
+
+    if (!isLogin && form.phone && !VIETNAM_PHONE_PATTERN.test(form.phone)) {
+      setError('Số điện thoại phải gồm 10 số và bắt đầu bằng 03, 05, 07, 08 hoặc 09.');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      if (isLogin) await login({ email: form.email, password: form.password });
-      else await register(form);
+      if (isLogin) await login({ email: form.email.trim(), password: form.password });
+      else {
+        await register({
+          fullName: form.fullName.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          phone: form.phone,
+        });
+      }
       onClose();
       const redirectUrl = sessionStorage.getItem('redirect_after_login');
       if (redirectUrl) {
@@ -221,12 +251,24 @@ export default function AuthModal({ mode, onClose }) {
             <form onSubmit={submit} className="space-y-4">
               {!isLogin && (
                 <>
-                  <input name="fullName" value={form.fullName} onChange={updateField} placeholder="Họ và tên" required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
-                  <input name="phone" value={form.phone} onChange={updateField} placeholder="Số điện thoại (không bắt buộc)" className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+                  <input name="fullName" value={form.fullName} onChange={updateField} placeholder="Họ và tên" maxLength={150} required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+                  <input name="phone" type="tel" inputMode="numeric" value={form.phone} onChange={updateField} placeholder="Số điện thoại (không bắt buộc)" maxLength={10} pattern="(03|05|07|08|09)[0-9]{8}" className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
                 </>
               )}
-              <input name="email" type="email" value={form.email} onChange={updateField} placeholder="Email" required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+              <input name="email" type="email" value={form.email} onChange={updateField} placeholder="Email" maxLength={254} required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
               <input name="password" type="password" value={form.password} onChange={updateField} placeholder="Mật khẩu" minLength={6} required className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500" />
+              {!isLogin && (
+                <input
+                  name="confirmPassword"
+                  type="password"
+                  value={form.confirmPassword}
+                  onChange={updateField}
+                  placeholder="Nhập lại mật khẩu"
+                  minLength={6}
+                  required
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-red-500"
+                />
+              )}
               {error && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
               <button type="submit" disabled={isSubmitting} className="w-full cursor-pointer rounded-lg bg-red-500 px-4 py-3 font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60">
                 {isSubmitting ? 'Đang xử lý...' : isLogin ? 'Đăng nhập' : 'Đăng ký'}

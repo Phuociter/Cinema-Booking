@@ -1,126 +1,36 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using MovieBooking.Data;
-using MovieBooking.Data.Entities;
 using MovieBooking.Service.DTOs;
 using MovieBooking.Service.Interfaces;
-using StackExchange.Redis;
 
 namespace MovieBooking.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController : ControllerBase
+public sealed class AuthController : ControllerBase
 {
-    private readonly AppDbContext _context;
-    private readonly IConfiguration _configuration;
-    private readonly IUserProfileService _userProfileService;
-    private readonly ILogger<AuthController> _logger;
+    private readonly IAuthService _authService;
 
-    public AuthController(
-        AppDbContext context,
-        IConfiguration configuration,
-        IUserProfileService userProfileService,
-        ILogger<AuthController> logger)
+    public AuthController(IAuthService authService)
     {
-        _context = context;
-        _configuration = configuration;
-        _userProfileService = userProfileService;
-        _logger = logger;
+        _authService = authService;
     }
 
     [HttpPost("register")]
-    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    public async Task<IActionResult> Register(
+        [FromBody] RegisterRequest request,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.FullName))
-            return BadRequest(new { message = "Họ và tên không được để trống" });
-
-        if (string.IsNullOrWhiteSpace(request.Email))
-            return BadRequest(new { message = "Email không được để trống" });
-
-        if (string.IsNullOrWhiteSpace(request.Password))
-            return BadRequest(new { message = "Mật khẩu không được để trống" });
-
-        var normalizedEmail = request.Email.Trim();
-
-        var exists = await _context.Users.AnyAsync(u => u.Email == normalizedEmail && u.DeletedAt == null);
-        if (exists)
-            return Conflict(new { message = "Email đã tồn tại" });
-
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            FullName = request.FullName.Trim(),
-            Email = normalizedEmail,
-            Phone = request.Phone,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        await AssignCustomerRoleAsync(user);
-
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
-
-        var roles = GetRoles(user);
-        var token = GenerateJwtToken(user, roles);
-
-        return Ok(new AuthResponse
-        {
-            Token = token,
-            ExpireAt = DateTime.UtcNow.AddHours(24),
-            User = new UserDto
-            {
-                Id = user.Id,
-                FullName = user.FullName,
-                Email = user.Email,
-                Phone = user.Phone,
-                AvatarUrl = user.AvatarUrl,
-                AuthProvider = user.AuthProvider,
-                Roles = roles
-            }
-        });
+        return ToActionResult(await _authService.RegisterAsync(request, cancellationToken));
     }
 
     [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequest request)
+    public async Task<IActionResult> Login(
+        [FromBody] LoginRequest request,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
-            return BadRequest(new { message = "Email và mật khẩu không được để trống" });
-
-        var user = await _context.Users
-            .Include(item => item.UserRoles)
-                .ThenInclude(userRole => userRole.Role)
-            .FirstOrDefaultAsync(
-                u => u.Email.ToLower() == request.Email.Trim().ToLower() && u.DeletedAt == null);
-
-        if (user == null || string.IsNullOrEmpty(user.PasswordHash) || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-            return Unauthorized(new { message = "Email hoặc mật khẩu không hợp lệ" });
-
-        var roles = GetRoles(user);
-        var token = GenerateJwtToken(user, roles);
-
-        return Ok(new AuthResponse
-        {
-            Token = token,
-            ExpireAt = DateTime.UtcNow.AddHours(24),
-            User = new UserDto
-            {
-                Id = user.Id,
-                FullName = user.FullName,
-                Email = user.Email,
-                Phone = user.Phone,
-                AvatarUrl = user.AvatarUrl,
-                AuthProvider = user.AuthProvider,
-                Roles = roles
-            }
-        });
+        return ToActionResult(await _authService.LoginAsync(request, cancellationToken));
     }
 
     [AllowAnonymous]
@@ -130,33 +40,7 @@ public class AuthController : ControllerBase
         [FromBody] ForgotPasswordRequest request,
         CancellationToken cancellationToken)
     {
-        const string responseMessage =
-            "Nếu email tồn tại, chúng tôi đã gửi hướng dẫn đặt lại mật khẩu.";
-        var frontendUrl = _configuration["FRONTEND_URL"]
-            ?? Environment.GetEnvironmentVariable("FRONTEND_URL")
-            ?? string.Empty;
-
-        try
-        {
-            await _userProfileService.RequestPasswordResetAsync(
-                request.Email,
-                frontendUrl,
-                cancellationToken);
-        }
-        catch (RedisException exception)
-        {
-            _logger.LogError(exception, "Password-reset request could not access Redis.");
-        }
-        catch (EmailDeliveryException exception)
-        {
-            _logger.LogError(exception, "Password-reset email delivery failed.");
-        }
-        catch (InvalidOperationException exception)
-        {
-            _logger.LogError(exception, "Password-reset request could not be completed due to invalid configuration.");
-        }
-
-        return Ok(new { message = responseMessage });
+        return ToActionResult(await _authService.ForgotPasswordAsync(request, cancellationToken));
     }
 
     [AllowAnonymous]
@@ -167,242 +51,28 @@ public class AuthController : ControllerBase
         [FromBody] ResetPasswordRequest request,
         CancellationToken cancellationToken)
     {
-        const string invalidTokenMessage = "Liên kết không hợp lệ hoặc đã hết hạn.";
-
-        try
-        {
-            var result = await _userProfileService.ResetPasswordAsync(request, cancellationToken);
-            return result switch
-            {
-                ResetPasswordResult.Success => Ok(new { message = "Đặt lại mật khẩu thành công." }),
-                ResetPasswordResult.InvalidToken => BadRequest(new { message = invalidTokenMessage }),
-                _ => throw new InvalidOperationException("Unexpected password-reset result.")
-            };
-        }
-        catch (RedisException exception)
-        {
-            _logger.LogError(exception, "Password-reset token could not be verified because Redis is unavailable.");
-            return BadRequest(new { message = invalidTokenMessage });
-        }
+        return ToActionResult(await _authService.ResetPasswordAsync(request, cancellationToken));
     }
 
     [Authorize]
     [HttpGet("me")]
-    public async Task<IActionResult> Me()
+    public async Task<IActionResult> Me(CancellationToken cancellationToken)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
-        if (string.IsNullOrWhiteSpace(userId))
-            return Unauthorized();
-
-        var guid = Guid.Parse(userId);
-
-        var user = await _context.Users
-            .Include(item => item.UserRoles)
-                .ThenInclude(userRole => userRole.Role)
-            .FirstOrDefaultAsync(u => u.Id == guid && u.DeletedAt == null);
-
-        if (user == null)
-            return NotFound();
-
-        return Ok(new UserDto
-        {
-            Id = user.Id,
-            FullName = user.FullName,
-            Email = user.Email,
-            Phone = user.Phone,
-            AvatarUrl = user.AvatarUrl,
-            AuthProvider = user.AuthProvider,
-            Roles = GetRoles(user)
-        });
+        return ToActionResult(await _authService.GetCurrentUserAsync(userId, cancellationToken));
     }
 
     [HttpPost("clerk-sync")]
     [Authorize(AuthenticationSchemes = "ClerkJwt")]
-    public async Task<IActionResult> ClerkSync()
+    public async Task<IActionResult> ClerkSync(CancellationToken cancellationToken)
     {
-        var clerkUserId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(clerkUserId))
-            return Unauthorized(new { message = "Token Clerk không hợp lệ: thiếu sub claim" });
-
-        var email = User.FindFirstValue("email") ?? User.FindFirstValue(ClaimTypes.Email);
-        var fullName = User.FindFirstValue("name") ?? User.FindFirstValue(ClaimTypes.Name);
-        var emailVerified = User.FindFirstValue("email_verified");
-
-        // Nếu token Clerk không có sẵn claim email, Backend gọi Clerk API theo sub
-        if (string.IsNullOrEmpty(email))
-        {
-            var clerkSecretKey = _configuration["CLERK_SECRET_KEY"] 
-                ?? Environment.GetEnvironmentVariable("CLERK_SECRET_KEY");
-
-            if (string.IsNullOrEmpty(clerkSecretKey))
-                return Unauthorized(new { message = "Chưa cấu hình CLERK_SECRET_KEY để xác thực email người dùng" });
-
-            using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", clerkSecretKey);
-            var response = await httpClient.GetAsync($"https://api.clerk.com/v1/users/{clerkUserId}");
-            if (!response.IsSuccessStatusCode)
-                return Unauthorized(new { message = "Không thể lấy thông tin người dùng từ Clerk Backend API" });
-
-            var userJson = await response.Content.ReadAsStringAsync();
-            using var doc = System.Text.Json.JsonDocument.Parse(userJson);
-            var root = doc.RootElement;
-            var primaryEmailId = root.TryGetProperty("primary_email_address_id", out var pId) ? pId.GetString() : null;
-
-            if (root.TryGetProperty("email_addresses", out var emails) && emails.ValueKind == System.Text.Json.JsonValueKind.Array)
-            {
-                foreach (var item in emails.EnumerateArray())
-                {
-                    var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-                    var address = item.TryGetProperty("email_address", out var addrProp) ? addrProp.GetString() : null;
-                    var isVerified = item.TryGetProperty("verification", out var vProp)
-                        && vProp.TryGetProperty("status", out var sProp)
-                        && sProp.GetString() == "verified";
-
-                    if (isVerified && (id == primaryEmailId || string.IsNullOrEmpty(email)))
-                    {
-                        email = address;
-                        emailVerified = "true";
-                        if (id == primaryEmailId) break;
-                    }
-                }
-            }
-
-            if (string.IsNullOrEmpty(fullName))
-            {
-                var firstName = root.TryGetProperty("first_name", out var f) ? f.GetString() : "";
-                var lastName = root.TryGetProperty("last_name", out var l) ? l.GetString() : "";
-                fullName = $"{firstName} {lastName}".Trim();
-            }
-        }
-
-        if (string.IsNullOrEmpty(email))
-            return Unauthorized(new { message = "Token Clerk không hợp lệ hoặc thiếu thông tin email" });
-
-        if (!string.Equals(emailVerified, "true", StringComparison.OrdinalIgnoreCase))
-            return BadRequest(new { message = "Email chưa được xác thực qua Clerk" });
-
-        var normalizedEmail = email.Trim();
-
-        // 1. Tìm theo clerk_id
-        var user = await _context.Users
-            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.ClerkId == clerkUserId && u.DeletedAt == null);
-
-        if (user == null)
-        {
-            // 2. Tìm theo email để liên kết với tài khoản local có sẵn
-            user = await _context.Users
-                .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-                .FirstOrDefaultAsync(u => u.Email == normalizedEmail && u.DeletedAt == null);
-
-            if (user != null)
-            {
-                user.ClerkId = clerkUserId;
-                user.UpdatedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                // 3. Tạo mới tài khoản Clerk
-                user = new User
-                {
-                    Id = Guid.NewGuid(),
-                    FullName = fullName ?? normalizedEmail,
-                    Email = normalizedEmail,
-                    ClerkId = clerkUserId,
-                    AuthProvider = "clerk",
-                    PasswordHash = null,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                await AssignCustomerRoleAsync(user);
-                _context.Users.Add(user);
-            }
-
-            // TODO: xử lý race condition kỹ hơn nếu cần scale
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateException)
-            {
-                _context.ChangeTracker.Clear();
-                user = await _context.Users
-                    .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-                    .FirstOrDefaultAsync(u => u.Email == normalizedEmail && u.DeletedAt == null);
-
-                if (user == null)
-                    throw;
-            }
-        }
-
-        var roles = GetRoles(user);
-        var token = GenerateJwtToken(user, roles);
-
-        return Ok(new AuthResponse
-        {
-            Token = token,
-            ExpireAt = DateTime.UtcNow.AddHours(24),
-            User = new UserDto
-            {
-                Id = user.Id,
-                FullName = user.FullName,
-                Email = user.Email,
-                Phone = user.Phone,
-                AvatarUrl = user.AvatarUrl,
-                AuthProvider = user.AuthProvider,
-                Roles = roles
-            }
-        });
+        return ToActionResult(await _authService.ClerkSyncAsync(User, cancellationToken));
     }
 
-    private async Task AssignCustomerRoleAsync(User user)
+    private IActionResult ToActionResult(AuthOperationResult result)
     {
-        var customerRole = await _context.Roles.FirstOrDefaultAsync(role => role.Name == "Customer");
-        if (customerRole != null)
-        {
-            user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = customerRole.Id, Role = customerRole });
-        }
-    }
-    private static List<string> GetRoles(User user)
-    {
-        var roles = user.UserRoles
-            .Where(userRole => userRole.Role != null)
-            .Select(userRole => userRole.Role.Name)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        return roles.Count > 0 ? roles : new List<string> { "Customer" };
-    }
-
-    private string GenerateJwtToken(User user, IReadOnlyCollection<string> roles)
-    {
-        var jwtSecret = _configuration["JWT_SECRET"] ?? Environment.GetEnvironmentVariable("JWT_SECRET");
-        if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
-        {
-            throw new InvalidOperationException("CẤU HÌNH BẢO MẬT KHÔNG HỢP LỆ: Biến môi trường JWT_SECRET chưa được thiết lập hoặc ngắn hơn 32 ký tự.");
-        }
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-        var claims = new List<Claim>
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.FullName ?? user.Email)
-        };
-
-        claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
-
-        var token = new JwtSecurityToken(
-            issuer: null,
-            audience: null,
-            claims: claims,
-            notBefore: DateTime.UtcNow.AddMinutes(-1),
-            expires: DateTime.UtcNow.AddHours(24),
-            signingCredentials: creds);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        return result.Value is null
+            ? StatusCode(result.StatusCode)
+            : StatusCode(result.StatusCode, result.Value);
     }
 }
