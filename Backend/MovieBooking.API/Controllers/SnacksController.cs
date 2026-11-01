@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using MovieBooking.Service.DTOs;
 using MovieBooking.Service.Interfaces;
+using System;
+using System.Threading.Tasks;
 
 namespace MovieBooking.API.Controllers
 {
@@ -9,6 +11,7 @@ namespace MovieBooking.API.Controllers
     {
         private readonly ISnackService _snackService;
 
+        // Controller giờ chỉ inject ISnackService chuẩn 3-Layer
         public SnacksController(ISnackService snackService)
         {
             _snackService = snackService;
@@ -51,6 +54,7 @@ namespace MovieBooking.API.Controllers
             return Ok(new { message = "Đã xóa món thành công." });
         }
 
+
         // ==========================================
         // 2. QUẢN LÝ THỰC ĐƠN TẠI TỪNG CỤM RẠP
         // ==========================================
@@ -76,19 +80,17 @@ namespace MovieBooking.API.Controllers
         // [Authorize(Roles = "Admin")]
         public async Task<IActionResult> UpdateCinemaSnack(Guid cinemaId, Guid snackId, [FromBody] UpdateCinemaSnackRequest request)
         {
+            // API này gánh luôn 2 nhiệm vụ: Sửa giá VÀ Ẩn/Hiện món (thay cho chức năng Xóa cứng cũ)
             var success = await _snackService.UpdateCinemaSnackAsync(cinemaId, snackId, request.Price, request.IsAvailable);
             if (!success) return NotFound(new { message = "Không tìm thấy món này tại rạp." });
-            return Ok(new { message = "Cập nhật giá và trạng thái thành công." });
+            return Ok(new { message = "Cập nhật thông tin và trạng thái thành công." });
         }
 
-        [HttpDelete("api/cinemas/{cinemaId}/snacks/{snackId}")]
-        // [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> RemoveSnackFromCinema(Guid cinemaId, Guid snackId)
-        {
-            var success = await _snackService.RemoveSnackFromCinemaAsync(cinemaId, snackId);
-            if (!success) return NotFound(new { message = "Không tìm thấy món này tại rạp." });
-            return Ok(new { message = "Đã gỡ món khỏi rạp." });
-        }
+        // ==========================================
+        // YÊU CẦU TASK: ĐÃ LOẠI BỎ HTTP DELETE
+        // Tuyệt đối không xóa cứng dữ liệu để tránh làm đứt gãy lịch sử hóa đơn đặt vé.
+        // Chức năng xóa đã được thay bằng cập nhật trạng thái IsAvailable = false ở hàm HttpPut phía trên.
+        // ==========================================
     }
 
     // ==========================================
