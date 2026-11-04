@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { AlertCircle, AlertTriangle, RefreshCw } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { AdminModal } from '../ui';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { formatCurrency, formatDateTime } from '../../../lib/formatters';
@@ -222,17 +223,30 @@ export const OrderDetailModal = ({ orderId, isOpen, onClose }) => {
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b border-zinc-800 text-zinc-400">
-                      <th className="py-1.5 px-2 font-medium">Ghế</th>
+                      <th className="py-1.5 px-2 font-medium">Hàng</th>
+                      <th className="py-1.5 px-2 font-medium">Số ghế</th>
                       <th className="py-1.5 px-2 font-medium">Loại ghế</th>
                       <th className="py-1.5 px-2 font-medium text-right">Giá vé</th>
+                      <th className="py-1.5 px-2 font-medium text-center">QR vé</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/60">
                     {detail.tickets.map((t) => (
                       <tr key={t.id || t.seatCode}>
-                        <td className="py-1.5 px-2 font-mono font-medium text-zinc-200">{t.seatCode}</td>
+                        <td className="py-1.5 px-2 font-mono text-zinc-300">{t.rowLabel || '—'}</td>
+                        <td className="py-1.5 px-2 font-mono font-medium text-zinc-200">{t.columnNumber || t.seatCode}</td>
                         <td className="py-1.5 px-2 text-zinc-300">{t.seatTypeName}</td>
                         <td className="py-1.5 px-2 text-right font-medium text-zinc-200">{formatCurrency(t.price)}</td>
+                        <td className="py-1.5 px-2">
+                          <div className="mx-auto w-fit rounded bg-white p-1.5">
+                            <QRCodeSVG
+                              value={t.qrCode || `TICKET-${t.id}`}
+                              size={72}
+                              level="H"
+                              aria-label={`Mã QR vé ghế ${t.seatCode}`}
+                            />
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

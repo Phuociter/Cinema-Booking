@@ -256,7 +256,7 @@ const Theaters = () => {
 
                   {/* Nút hành động */}
                   <button
-                    onClick={() => navigate('/movies')}
+                    onClick={() => navigate(`/movies?cinemaId=${theater.id}&city=${encodeURIComponent(theater.city || '')}`)}
                     className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-xl font-bold text-xs shadow-md shadow-red-600/30 transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Film className="w-3.5 h-3.5" /> Xem Phim & Suất Chiếu

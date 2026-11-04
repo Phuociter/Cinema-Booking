@@ -21,7 +21,8 @@ public interface IBookingRepository : IGenericRepository<Booking>
         int pageSize,
         DateTime nowUtc,
         Guid? cinemaId = null,
-        Guid? movieId = null);
+        Guid? movieId = null,
+        Guid? userId = null);
 
     Task<Booking?> GetAdminBookingDetailByIdAsync(Guid id);
 }

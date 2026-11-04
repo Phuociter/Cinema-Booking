@@ -57,7 +57,8 @@ public class AdminBookingService : IAdminBookingService
             pageSize,
             nowUtc,
             query.CinemaId,
-            query.MovieId);
+            query.MovieId,
+            query.UserId);
 
         var dtos = items.Select(b => MapToAdminBookingDto(b, nowUtc)).ToList();
 
@@ -116,6 +117,7 @@ public class AdminBookingService : IAdminBookingService
                 .Select(t => new AdminBookingTicketDto
                 {
                     Id = t.Id,
+                    QrCode = t.QrCode,
                     SeatCode = t.ShowtimeSeat?.Seat?.SeatCode ?? string.Empty,
                     RowLabel = t.ShowtimeSeat?.Seat?.RowLabel ?? string.Empty,
                     ColumnNumber = t.ShowtimeSeat?.Seat?.ColumnNumber ?? 0,
