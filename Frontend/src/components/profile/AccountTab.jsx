@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { accountApi } from '../../api/useAccount';
@@ -16,6 +16,7 @@ const VIETNAM_PHONE_PATTERN = /^(03|05|07|08|09)\d{8}$/;
 
 const AccountTab = () => {
   const { user, updateUser } = useAuth();
+  const fileInputRef = useRef(null);
   const [profile, setProfile] = useState({
     fullName: user?.fullName ?? '',
     email: user?.email ?? '',
@@ -73,16 +74,17 @@ const AccountTab = () => {
   const handleAvatarSelection = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    event.target.value = '';
 
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
     const allowedTypes = ALLOWED_AVATAR_TYPES_BY_EXTENSION.get(fileExtension);
     if (!allowedTypes?.includes(file.type.toLowerCase())) {
       toast.error('Vui lòng chọn ảnh JPEG, PNG hoặc WebP.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
     if (file.size > MAX_AVATAR_SIZE_BYTES) {
       toast.error('Ảnh đại diện không được vượt quá 5 MB.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
@@ -95,6 +97,7 @@ const AccountTab = () => {
     setSelectedAvatar(null);
     setAvatarPreviewUrl(resolveApiAssetUrl(profile.avatarUrl));
     setAvatarPreviewFailed(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleAvatarUpload = async () => {
@@ -109,6 +112,7 @@ const AccountTab = () => {
       }));
       updateUser(updatedProfile);
       setSelectedAvatar(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       setAvatarPreviewUrl(resolveApiAssetUrl(updatedProfile.avatarUrl));
       setAvatarPreviewFailed(false);
       toast.success('Ảnh đại diện đã được cập nhật.');
@@ -216,38 +220,47 @@ const AccountTab = () => {
               <p className="text-xs text-slate-400">Chọn ảnh JPEG, PNG hoặc WebP, dung lượng tối đa 5 MB.</p>
             </div>
             <input
+              ref={fileInputRef}
               id="profile-avatar-file"
               type="file"
               accept="image/png, image/jpeg, image/jpg, image/webp"
               onChange={handleAvatarSelection}
               disabled={isLoading || isUploadingAvatar}
-              className="block w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900 text-sm text-slate-300 file:mr-4 file:cursor-pointer file:border-0 file:bg-slate-700 file:px-4 file:py-2 file:text-white hover:file:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+              className="hidden"
             />
-            {selectedAvatar && (
-              <>
-                <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300">
-                  <span className="min-w-0 break-all">
-                    📄 {selectedAvatar.name} - {(selectedAvatar.size / (1024 * 1024)).toFixed(1)} MB
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleAvatarSelectionCancel}
-                    disabled={isUploadingAvatar}
-                    aria-label="Hủy chọn ảnh đại diện"
-                    className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <X size={16} aria-hidden="true" />
-                  </button>
-                </div>
+            <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 p-1.5 text-sm">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading || isUploadingAvatar}
+                className="cursor-pointer rounded bg-slate-700 px-4 py-1.5 font-medium text-white transition-colors hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Chọn tệp
+              </button>
+              <span className={`min-w-0 flex-1 truncate ${selectedAvatar ? 'text-white' : 'text-slate-400'}`}>
+                {selectedAvatar ? selectedAvatar.name : 'Chưa có tệp nào được chọn'}
+              </span>
+              {selectedAvatar && (
                 <button
                   type="button"
-                  onClick={handleAvatarUpload}
-                  disabled={isLoading || isUploadingAvatar}
-                  className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={handleAvatarSelectionCancel}
+                  disabled={isUploadingAvatar}
+                  aria-label="Hủy chọn ảnh đại diện"
+                  className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isUploadingAvatar ? 'Đang tải ảnh lên...' : 'Tải ảnh đại diện lên'}
+                  <X size={16} aria-hidden="true" />
                 </button>
-              </>
+              )}
+            </div>
+            {selectedAvatar && (
+              <button
+                type="button"
+                onClick={handleAvatarUpload}
+                disabled={isLoading || isUploadingAvatar}
+                className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isUploadingAvatar ? 'Đang tải ảnh lên...' : 'Tải ảnh đại diện lên'}
+              </button>
             )}
           </div>
           <div>
