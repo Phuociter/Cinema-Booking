@@ -10,6 +10,7 @@ public class AdminBookingsQuery
     public DateOnly? DateTo { get; set; }
     public Guid? CinemaId { get; set; }
     public Guid? MovieId { get; set; }
+    public Guid? UserId { get; set; }
 }
 
 public class AdminBookingDto
@@ -46,6 +47,7 @@ public class AdminBookingDetailDto : AdminBookingDto
 public class AdminBookingTicketDto
 {
     public Guid Id { get; set; }
+    public string? QrCode { get; set; }
     public string SeatCode { get; set; } = string.Empty;
     public string RowLabel { get; set; } = string.Empty;
     public int ColumnNumber { get; set; }

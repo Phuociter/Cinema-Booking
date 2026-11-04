@@ -56,11 +56,17 @@ public class BookingRepository : GenericRepository<Booking>, IBookingRepository
         int pageSize,
         DateTime nowUtc,
         Guid? cinemaId = null,
-        Guid? movieId = null)
+        Guid? movieId = null,
+        Guid? userId = null)
     {
         var query = _context.Bookings
             .IgnoreQueryFilters()
             .AsNoTracking();
+
+        if (userId.HasValue)
+        {
+            query = query.Where(booking => booking.UserId == userId.Value);
+        }
 
         if (!string.IsNullOrWhiteSpace(status))
         {

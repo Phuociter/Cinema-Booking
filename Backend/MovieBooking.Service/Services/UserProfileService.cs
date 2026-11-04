@@ -1,8 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-using MovieBooking.Data;
 using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories.Interfaces;
 using MovieBooking.Service.DTOs;
 using MovieBooking.Service.Interfaces;
 using StackExchange.Redis;
@@ -11,6 +10,7 @@ namespace MovieBooking.Service.Services;
 
 public sealed class UserProfileService : IUserProfileService
 {
+    private const long MaxAvatarFileSizeBytes = 5 * 1024 * 1024;
     private const int ResetTokenLifetimeSeconds = 15 * 60;
 
     private const string ConsumeResetTokenScript = """
@@ -22,16 +22,19 @@ public sealed class UserProfileService : IUserProfileService
         return false
         """;
 
-    private readonly AppDbContext _context;
+    private readonly IUserRepository _userRepository;
+    private readonly IAvatarStorage _avatarStorage;
     private readonly IDatabase _redis;
     private readonly IEmailSender _emailSender;
 
     public UserProfileService(
-        AppDbContext context,
+        IUserRepository userRepository,
+        IAvatarStorage avatarStorage,
         IConnectionMultiplexer redis,
         IEmailSender emailSender)
     {
-        _context = context;
+        _userRepository = userRepository;
+        _avatarStorage = avatarStorage;
         _redis = redis.GetDatabase();
         _emailSender = emailSender;
     }
@@ -58,7 +61,7 @@ public sealed class UserProfileService : IUserProfileService
             user.AvatarUrl = string.IsNullOrWhiteSpace(request.AvatarUrl) ? null : request.AvatarUrl.Trim();
         user.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _userRepository.SaveChangesAsync(cancellationToken);
         return MapUser(user);
     }
 
@@ -74,8 +77,43 @@ public sealed class UserProfileService : IUserProfileService
         user.AvatarUrl = avatarUrl;
         user.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _userRepository.SaveChangesAsync(cancellationToken);
         return MapUser(user);
+    }
+
+    public async Task<AvatarUploadResult> UploadAvatarAsync(
+        Guid userId,
+        Stream fileStream,
+        long fileSize,
+        CancellationToken cancellationToken)
+    {
+        if (fileSize > MaxAvatarFileSizeBytes)
+            return new AvatarUploadResult(AvatarUploadStatus.FileTooLarge);
+
+        var storedAvatar = await _avatarStorage.SaveAsync(fileStream, cancellationToken);
+        if (storedAvatar is null)
+            return new AvatarUploadResult(AvatarUploadStatus.InvalidImage);
+
+        var avatarSaved = false;
+        try
+        {
+            var previousProfile = await GetProfileAsync(userId, cancellationToken);
+            if (previousProfile is null)
+                return new AvatarUploadResult(AvatarUploadStatus.UserNotFound);
+
+            var updatedProfile = await UpdateAvatarAsync(userId, storedAvatar.Url, cancellationToken);
+            if (updatedProfile is null)
+                return new AvatarUploadResult(AvatarUploadStatus.UserNotFound);
+
+            avatarSaved = true;
+            _avatarStorage.DeletePreviousLocalAvatar(previousProfile.AvatarUrl, storedAvatar.FileName);
+            return new AvatarUploadResult(AvatarUploadStatus.Success, updatedProfile);
+        }
+        finally
+        {
+            if (!avatarSaved)
+                _avatarStorage.DeleteFile(storedAvatar);
+        }
     }
 
     public async Task<ChangePasswordResult> ChangePasswordAsync(
@@ -83,8 +121,11 @@ public sealed class UserProfileService : IUserProfileService
         ChangePasswordRequest request,
         CancellationToken cancellationToken)
     {
-        var user = await _context.Users
-            .FirstOrDefaultAsync(item => item.Id == userId && item.DeletedAt == null, cancellationToken);
+        var user = await _userRepository.GetUserByIdAsync(
+            userId,
+            includeDeleted: false,
+            includeRoles: false,
+            cancellationToken);
 
         if (user is null)
             return ChangePasswordResult.UserNotFound;
@@ -100,7 +141,7 @@ public sealed class UserProfileService : IUserProfileService
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         user.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        await _userRepository.SaveChangesAsync(cancellationToken);
 
         return ChangePasswordResult.Success;
     }
@@ -137,11 +178,11 @@ public sealed class UserProfileService : IUserProfileService
             return;
         }
 
-        var user = await _context.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                item => item.Email.ToLower() == normalizedEmail && item.DeletedAt == null,
-                cancellationToken);
+        var user = await _userRepository.GetUserByEmailAsync(
+            normalizedEmail,
+            includeDeleted: false,
+            includeRoles: false,
+            cancellationToken);
 
         if (user is null
             || !string.Equals(user.AuthProvider, "local", StringComparison.OrdinalIgnoreCase)
@@ -204,29 +245,24 @@ public sealed class UserProfileService : IUserProfileService
         if (!Guid.TryParse((string?)userIdValue, out var userId))
             return ResetPasswordResult.InvalidToken;
 
-        var user = await _context.Users.FirstOrDefaultAsync(
-            item => item.Id == userId
-                && item.DeletedAt == null
-                && item.AuthProvider == "local"
-                && item.PasswordHash != null
-                && item.PasswordHash != string.Empty,
-            cancellationToken);
+        var user = await _userRepository.GetLocalUserForPasswordResetAsync(userId, cancellationToken);
         if (user is null)
             return ResetPasswordResult.InvalidToken;
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         user.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        await _userRepository.SaveChangesAsync(cancellationToken);
 
         return ResetPasswordResult.Success;
     }
 
     private Task<User?> GetUserWithRolesAsync(Guid userId, CancellationToken cancellationToken)
     {
-        return _context.Users
-            .Include(user => user.UserRoles)
-                .ThenInclude(userRole => userRole.Role)
-            .FirstOrDefaultAsync(user => user.Id == userId && user.DeletedAt == null, cancellationToken);
+        return _userRepository.GetUserByIdAsync(
+            userId,
+            includeDeleted: false,
+            includeRoles: true,
+            cancellationToken);
     }
 
     private static UserDto MapUser(User user)
