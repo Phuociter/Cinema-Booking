@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Clock, 
@@ -19,6 +20,41 @@ import BlurCircle from '../components/BlurCircle';
 import MovieCard from '../components/MovieCard';
 import CityShowtimeModal from '../components/booking/CityShowtimeModal';
 
+const ActorAvatar = ({ actor }) => {
+  const [imageFailed, setImageFailed] = useState(!actor?.profilePath);
+  const initials = (actor?.name || '?')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('') || '?';
+
+  if (imageFailed) {
+    return (
+      <div
+        role="img"
+        aria-label={`Ảnh đại diện ${actor?.name || 'diễn viên'}`}
+        className="w-20 h-20 rounded-full mx-auto mb-3 flex items-center justify-center
+          bg-gradient-to-br from-red-500 to-purple-700 text-white text-xl font-bold
+          shadow-md border border-white/10 group-hover:scale-105 transition-transform"
+      >
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={actor.profilePath}
+      alt={actor.name || 'Diễn viên'}
+      onError={() => setImageFailed(true)}
+      className="w-20 h-20 object-cover rounded-full mx-auto mb-3 shadow-md
+        border border-white/10 group-hover:scale-105 transition-transform"
+      loading="lazy"
+    />
+  );
+};
 const MovieDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -29,6 +65,7 @@ const MovieDetail = () => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [relatedMovies, setRelatedMovies] = useState([]);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Gọi API lấy thông tin chi tiết phim thật từ Backend
   useEffect(() => {
@@ -45,8 +82,17 @@ const MovieDetail = () => {
         setMovie(data);
 
         // Kiểm tra danh sách yêu thích trong localStorage
-        const favorites = JSON.parse(localStorage.getItem('yeuThichPhim')) || [];
-        setIsFavorite(favorites.some((f) => f.id === data.id || f._id === data.id));
+        let favorites = [];
+        try {
+          const stored = JSON.parse(localStorage.getItem('cinema_favorites') || '[]');
+          favorites = Array.isArray(stored) ? stored : [];
+        } catch {
+          favorites = [];
+        }
+        const currentMovieId = data.id ?? data._id;
+        setIsFavorite(favorites.some(
+          (item) => String(item.id ?? item._id) === String(currentMovieId)
+        ));
 
         // Nạp thêm danh sách phim gợi ý thật từ Backend
         try {
@@ -72,20 +118,80 @@ const MovieDetail = () => {
     return () => {
       isMounted = false;
     };
-  }, [id]);
+  }, [id, refreshKey]);
 
-  // Toggle lưu phim yêu thích
+
+  // Đồng bộ chi tiết phim khi Admin thêm, sửa hoặc xóa phim.
+  useEffect(() => {
+    let disposed = false;
+    let connection;
+
+    const connect = async () => {
+      const apiBaseUrl = (
+        import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+      ).replace(/\/+$/, '');
+      const hubUrl = apiBaseUrl.replace(/\/api$/i, '') + '/hubs/movies';
+
+      connection = new HubConnectionBuilder()
+        .withUrl(hubUrl)
+        .withAutomaticReconnect()
+        .configureLogging(LogLevel.Warning)
+        .build();
+
+      const refresh = () => {
+        if (!disposed) setRefreshKey(value => value + 1);
+      };
+
+      connection.on('MovieCreated', refresh);
+      connection.on('MovieUpdated', refresh);
+      connection.on('MovieDeleted', refresh);
+      connection.onreconnected(refresh);
+
+      try {
+        await connection.start();
+        if (disposed) await connection.stop();
+      } catch (error) {
+        if (!disposed) console.warn('SignalR chi tiết phim:', error);
+      }
+    };
+
+    void connect();
+
+    return () => {
+      disposed = true;
+      if (connection) void connection.stop().catch(() => {});
+    };
+  }, []);
+  // Toggle yêu thích và đồng bộ với các component khác
   const toggleFavorite = () => {
     if (!movie) return;
-    const favorites = JSON.parse(localStorage.getItem('yeuThichPhim')) || [];
-    let newFavorites;
-    if (isFavorite) {
-      newFavorites = favorites.filter((f) => f.id !== movie.id && f._id !== movie.id);
-    } else {
-      newFavorites = [...favorites, movie];
+
+    let favorites = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem('cinema_favorites') || '[]');
+      favorites = Array.isArray(stored) ? stored : [];
+    } catch {
+      favorites = [];
     }
-    localStorage.setItem('yeuThichPhim', JSON.stringify(newFavorites));
-    setIsFavorite(!isFavorite);
+
+    const movieId = movie.id ?? movie._id;
+    const alreadyFavorite = favorites.some(
+      (item) => String(item.id ?? item._id) === String(movieId)
+    );
+
+    const updatedFavorites = alreadyFavorite
+      ? favorites.filter(
+          (item) => String(item.id ?? item._id) !== String(movieId)
+        )
+      : [...favorites, movie];
+
+    try {
+      localStorage.setItem('cinema_favorites', JSON.stringify(updatedFavorites));
+      setIsFavorite(!alreadyFavorite);
+      window.dispatchEvent(new Event('cinema-favorites-updated'));
+    } catch (error) {
+      console.error('Không thể cập nhật danh sách yêu thích:', error);
+    }
   };
 
   // Trạng thái đang tải dữ liệu
@@ -152,8 +258,8 @@ const MovieDetail = () => {
     );
   }
 
-  const backdropSrc = movie.backdropUrl || movie.posterUrl || 'https://picsum.photos/1280/720';
-  const posterSrc = movie.posterUrl || movie.backdropUrl || 'https://picsum.photos/400/600';
+  const backdropSrc = movie.backdropUrl || movie.posterUrl || '/backgroundImage.png';
+  const posterSrc = movie.posterUrl || movie.backdropUrl || '/backgroundImage.png';
   const releaseYear = movie.releaseDate ? new Date(movie.releaseDate).getFullYear() : 'N/A';
   const formattedReleaseDate = movie.releaseDate
     ? new Date(movie.releaseDate).toLocaleDateString('vi-VN')
@@ -178,6 +284,7 @@ const MovieDetail = () => {
               <img
                 src={posterSrc}
                 alt={`Poster phim ${movie.title}`}
+                onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = "/backgroundImage.png"; }}
                 className="w-full max-w-xs md:max-w-sm rounded-2xl shadow-2xl object-cover h-[450px] border border-white/10"
                 loading="lazy"
               />
@@ -300,12 +407,7 @@ const MovieDetail = () => {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {movie.actors.slice(0, 12).map((actor, index) => (
                 <div key={actor.actorId || index} className="text-center group bg-white/5 p-4 rounded-xl border border-white/5">
-                  <img
-                    src={actor.profilePath || `https://i.pravatar.cc/300?img=${index + 10}`}
-                    alt={actor.name}
-                    className="w-20 h-20 object-cover rounded-full mx-auto mb-3 shadow-md border border-white/10 group-hover:scale-105 transition-transform"
-                    loading="lazy"
-                  />
+                  <ActorAvatar actor={actor} />
                   <p className="text-gray-200 text-sm font-semibold truncate">{actor.name}</p>
                   {actor.characterName && (
                     <p className="text-gray-400 text-xs truncate mt-0.5">{actor.characterName}</p>

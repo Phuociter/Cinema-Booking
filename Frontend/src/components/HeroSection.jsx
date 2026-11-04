@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Clock, Star, Film, Ticket, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { axiosInstance } from '../api';
@@ -9,6 +10,7 @@ const HeroSection = () => {
   const [movies, setMovies] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Gọi API lấy các phim đang chiếu nổi bật từ Database
   useEffect(() => {
@@ -17,9 +19,8 @@ const HeroSection = () => {
         setLoading(true);
         const res = await axiosInstance.get('/movies?status=now_showing&page=1&pageSize=5');
         const items = res?.items || (Array.isArray(res) ? res : []);
-        if (items.length > 0) {
-          setMovies(items);
-        }
+        setMovies(items);
+        setCurrentIndex(0);
       } catch (err) {
         console.warn('Lỗi khi tải phim cho banner từ database:', err);
       } finally {
@@ -28,7 +29,7 @@ const HeroSection = () => {
     };
 
     fetchHeroMovies();
-  }, []);
+  }, [refreshKey]);
 
   // Tự động chuyển phim nổi bật mỗi 7 giây nếu có nhiều phim
   useEffect(() => {
@@ -39,6 +40,50 @@ const HeroSection = () => {
     return () => clearInterval(timer);
   }, [movies.length]);
 
+  // T? l?m m?i khi qu?n tr? vi?n th?m, s?a ho?c x?a phim.
+  useEffect(() => {
+      let disposed = false;
+      let connection = null;
+
+      const connect = async () => {
+          const apiBaseUrl = (
+              import.meta.env.VITE_API_BASE_URL ||
+              'http://localhost:5000/api'
+          ).replace(/\/+$/, '');
+
+          const hubUrl =
+              apiBaseUrl.replace(/\/api$/i, '') + '/hubs/movies';
+
+          const newConnection = new HubConnectionBuilder()
+              .withUrl(hubUrl)
+              .withAutomaticReconnect()
+              .configureLogging(LogLevel.Warning)
+              .build();
+
+          connection = newConnection;
+          const refresh = () => {
+              if (!disposed) setRefreshKey((value) => value + 1);
+          };
+
+          newConnection.on('MovieCreated', refresh);
+          newConnection.on('MovieUpdated', refresh);
+          newConnection.on('MovieDeleted', refresh);
+          newConnection.onreconnected(refresh);
+
+          try {
+              await newConnection.start();
+              if (disposed) await newConnection.stop();
+          } catch (error) {
+              if (!disposed) console.warn('SignalR banner', error);
+          }
+      };
+
+      void connect();
+      return () => {
+          disposed = true;
+          if (connection) void connection.stop().catch(() => {});
+      };
+  }, []);
   const currentMovie = movies[currentIndex] || null;
 
   const nextMovie = () => {
