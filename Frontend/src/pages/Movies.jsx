@@ -47,6 +47,7 @@ const Movies = () => {
     const [cinemasLoaded, setCinemasLoaded] = useState(false);
 
     const [loading, setLoading] = useState(true);
+    const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
     const [searchQuery, setSearchQuery] = useState(searchParam);
     const [debouncedSearch, setDebouncedSearch] = useState(searchParam);
     const [selectedGenre, setSelectedGenre] = useState('all');
@@ -223,6 +224,7 @@ const Movies = () => {
             } finally {
                 if (!cancelled) {
                     setLoading(false);
+                    setHasLoadedOnce(true);
                 }
             }
         };
@@ -420,6 +422,28 @@ const Movies = () => {
             return next;
         });
     };
+
+    if (loading && !hasLoadedOnce) {
+        return (
+            <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 px-4">
+                <div className="max-w-7xl mx-auto">
+                    <div className="flex items-center justify-center min-h-[60vh]">
+                        <div className="text-center">
+                            <Loader2 className="w-12 h-12 text-red-500 animate-spin mx-auto mb-4" />
+
+                            <h2 className="text-white text-xl font-semibold mb-2">
+                                Đang tải danh sách phim...
+                            </h2>
+
+                            <p className="text-gray-400">
+                                Vui lòng chờ trong giây lát
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 pt-24 pb-12">

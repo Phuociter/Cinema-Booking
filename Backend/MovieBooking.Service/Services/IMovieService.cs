@@ -1,4 +1,4 @@
-
+﻿
 using MovieBooking.Service.DTOs;
 
 namespace MovieBooking.Service.Services;
@@ -35,4 +35,16 @@ public interface IMovieService
     Task<bool> SoftDeleteMovieAsync(
         Guid id,
         CancellationToken cancellationToken = default);
-}
+
+    Task<GenreMutationResult> CreateGenreAsync(
+        string name,
+        CancellationToken cancellationToken = default);
+
+    Task<GenreMutationResult> UpdateGenreAsync(
+        Guid id,
+        string name,
+        CancellationToken cancellationToken = default);
+
+    Task<GenreMutationResult> DeleteGenreAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);}

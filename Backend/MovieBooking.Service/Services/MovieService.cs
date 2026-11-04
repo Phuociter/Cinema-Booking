@@ -1,4 +1,4 @@
-
+﻿
 using Microsoft.EntityFrameworkCore;
 using MovieBooking.Data;
 using MovieBooking.Data.Entities;
@@ -124,10 +124,7 @@ public class MovieService : IMovieService
         var genreIds = request.GenreIds.Distinct().ToList();
         var directorIds = request.DirectorIds.Distinct().ToList();
 
-        var actors = request.Actors
-            .GroupBy(x => x.ActorId)
-            .Select(g => g.First())
-            .ToList();
+        var actors = await ResolveMovieActorsAsync(request.Actors, cancellationToken);
 
         if (await _dbContext.Genres.CountAsync(
                 x => genreIds.Contains(x.Id),
@@ -143,16 +140,6 @@ public class MovieService : IMovieService
         {
             throw new ArgumentException(
                 "Một hoặc nhiều đạo diễn không tồn tại.");
-        }
-
-        var actorIds = actors.Select(x => x.ActorId).ToList();
-
-        if (await _dbContext.Actors.CountAsync(
-                x => actorIds.Contains(x.Id),
-                cancellationToken) != actorIds.Count)
-        {
-            throw new ArgumentException(
-                "Một hoặc nhiều diễn viên không tồn tại.");
         }
 
         var now = DateTime.UtcNow;
@@ -232,10 +219,7 @@ public class MovieService : IMovieService
         var genreIds = request.GenreIds.Distinct().ToList();
         var directorIds = request.DirectorIds.Distinct().ToList();
 
-        var actors = request.Actors
-            .GroupBy(x => x.ActorId)
-            .Select(g => g.First())
-            .ToList();
+        var actors = await ResolveMovieActorsAsync(request.Actors, cancellationToken);
 
         if (await _dbContext.Genres.CountAsync(
                 x => genreIds.Contains(x.Id),
@@ -251,16 +235,6 @@ public class MovieService : IMovieService
         {
             throw new ArgumentException(
                 "Một hoặc nhiều đạo diễn không tồn tại.");
-        }
-
-        var actorIds = actors.Select(x => x.ActorId).ToList();
-
-        if (await _dbContext.Actors.CountAsync(
-                x => actorIds.Contains(x.Id),
-                cancellationToken) != actorIds.Count)
-        {
-            throw new ArgumentException(
-                "Một hoặc nhiều diễn viên không tồn tại.");
         }
 
         movie.Title = request.Title.Trim();
@@ -355,6 +329,80 @@ public class MovieService : IMovieService
         return true;
     }
 
+    private async Task<List<(Guid ActorId, string? CharacterName)>> ResolveMovieActorsAsync(
+        IEnumerable<MovieActorRequest>? requests,
+        CancellationToken cancellationToken)
+    {
+        var resolved = new Dictionary<Guid, (Guid ActorId, string? CharacterName)>();
+
+        foreach (var actorRequest in requests ?? Enumerable.Empty<MovieActorRequest>())
+        {
+            var name = actorRequest.Name?.Trim();
+            Actor? actor = null;
+
+            // Ưu tiên ID nếu là diễn viên đã có.
+            if (actorRequest.ActorId is Guid requestedId &&
+                requestedId != Guid.Empty)
+            {
+                actor = await _dbContext.Actors.FirstOrDefaultAsync(
+                    x => x.Id == requestedId,
+                    cancellationToken);
+            }
+
+            // Nếu chưa tìm được theo ID, tìm bằng tên không phân biệt hoa/thường.
+            if (actor is null && !string.IsNullOrWhiteSpace(name))
+            {
+                var normalizedName = name.ToLower();
+
+                actor = await _dbContext.Actors.FirstOrDefaultAsync(
+                    x => x.Name.ToLower() == normalizedName,
+                    cancellationToken);
+            }
+
+            // Chưa tồn tại thì tạo diễn viên mới.
+            if (actor is null)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                    throw new ArgumentException(
+                        "Diễn viên mới phải có tên.");
+
+                actor = new Actor
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name,
+                    ProfilePath = string.IsNullOrWhiteSpace(actorRequest.ProfilePath)
+                        ? null
+                        : actorRequest.ProfilePath.Trim()
+                };
+
+                _dbContext.Actors.Add(actor);
+            }
+            else
+            {
+                // Cập nhật thông tin nếu người dùng cung cấp dữ liệu mới.
+                if (!string.IsNullOrWhiteSpace(name))
+                    actor.Name = name;
+
+                if (!string.IsNullOrWhiteSpace(actorRequest.ProfilePath))
+                    actor.ProfilePath = actorRequest.ProfilePath.Trim();
+            }
+
+            // Một diễn viên chỉ được liên kết một lần với cùng phim.
+            if (!resolved.ContainsKey(actor.Id))
+            {
+                resolved.Add(
+                    actor.Id,
+                    (
+                        actor.Id,
+                        string.IsNullOrWhiteSpace(actorRequest.CharacterName)
+                            ? null
+                            : actorRequest.CharacterName.Trim()
+                    ));
+            }
+        }
+
+        return resolved.Values.ToList();
+    }
     private static void ValidateMovieRequest(
         CreateMovieRequest request)
     {
@@ -374,9 +422,11 @@ public class MovieService : IMovieService
             throw new ArgumentException(
                 "Phải chọn ít nhất một thể loại.");
 
-        if (request.Actors.Any(x => x.ActorId == Guid.Empty))
+        if (request.Actors.Any(x =>
+                (!x.ActorId.HasValue || x.ActorId == Guid.Empty) &&
+                string.IsNullOrWhiteSpace(x.Name)))
             throw new ArgumentException(
-                "ID diễn viên không hợp lệ.");
+                "Mỗi diễn viên cần có tên hoặc Actor ID hợp lệ.");
     }
 
     private IQueryable<Movie> BuildMovieQuery(
@@ -561,4 +611,140 @@ public class MovieService : IMovieService
                 .ToList()
         };
     }
-}
+
+    public async Task<GenreMutationResult> CreateGenreAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return new GenreMutationResult
+            {
+                Error = "Tên thể loại không được để trống."
+            };
+        }
+
+        var duplicate = await _dbContext.Genres.AnyAsync(
+            genre => genre.Name.ToLower() == normalizedName.ToLower(),
+            cancellationToken);
+
+        if (duplicate)
+        {
+            return new GenreMutationResult
+            {
+                Conflict = true,
+                Error = "Tên thể loại đã tồn tại."
+            };
+        }
+
+        var genre = new Genre
+        {
+            Id = Guid.NewGuid(),
+            Name = normalizedName
+        };
+
+        _dbContext.Genres.Add(genre);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new GenreMutationResult
+        {
+            Genre = new GenreDto
+            {
+                Id = genre.Id,
+                Name = genre.Name
+            }
+        };
+    }
+
+    public async Task<GenreMutationResult> UpdateGenreAsync(
+        Guid id,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return new GenreMutationResult
+            {
+                Error = "Tên thể loại không được để trống."
+            };
+        }
+
+        var genre = await _dbContext.Genres.FirstOrDefaultAsync(
+            item => item.Id == id,
+            cancellationToken);
+
+        if (genre == null)
+        {
+            return new GenreMutationResult
+            {
+                NotFound = true,
+                Error = "Không tìm thấy thể loại."
+            };
+        }
+
+        var duplicate = await _dbContext.Genres.AnyAsync(
+            item => item.Id != id &&
+                    item.Name.ToLower() == normalizedName.ToLower(),
+            cancellationToken);
+
+        if (duplicate)
+        {
+            return new GenreMutationResult
+            {
+                Conflict = true,
+                Error = "Tên thể loại đã được sử dụng."
+            };
+        }
+
+        genre.Name = normalizedName;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new GenreMutationResult
+        {
+            Genre = new GenreDto
+            {
+                Id = genre.Id,
+                Name = genre.Name
+            }
+        };
+    }
+
+    public async Task<GenreMutationResult> DeleteGenreAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var genre = await _dbContext.Genres.FirstOrDefaultAsync(
+            item => item.Id == id,
+            cancellationToken);
+
+        if (genre == null)
+        {
+            return new GenreMutationResult
+            {
+                NotFound = true,
+                Error = "Không tìm thấy thể loại."
+            };
+        }
+
+        var isInUse = await _dbContext.MovieGenres.AnyAsync(
+            item => item.GenreId == id,
+            cancellationToken);
+
+        if (isInUse)
+        {
+            return new GenreMutationResult
+            {
+                Conflict = true,
+                Error = "Không thể xóa thể loại đang được gán cho phim. Hãy cập nhật thể loại của các phim liên quan trước."
+            };
+        }
+
+        _dbContext.Genres.Remove(genre);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new GenreMutationResult();
+    }}
