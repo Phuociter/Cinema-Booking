@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MovieBooking.Service.DTOs;
 using MovieBooking.Service.Services;
@@ -16,6 +16,7 @@ public class GenresController : ControllerBase
         _movieService = movieService;
     }
 
+    // GET: api/genres
     [HttpGet]
     public async Task<IActionResult> GetGenres(
         CancellationToken cancellationToken = default)
@@ -23,37 +24,32 @@ public class GenresController : ControllerBase
         return Ok(await _movieService.GetGenresAsync(cancellationToken));
     }
 
+    // POST: api/genres
     [HttpPost]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> CreateGenre(
         [FromBody] GenreRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
+        if (request == null || string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(new
-            {
-                message = "Tên thể loại không được để trống."
-            });
+            return BadRequest(new { message = "Tên thể loại không được để trống." });
         }
 
-        var result = await _movieService.CreateGenreAsync(
-            request.Name,
-            cancellationToken);
-
-        if (result.Conflict)
+        try
         {
-            return Conflict(new { message = result.Error });
-        }
+            var genre = await _movieService.CreateGenreAsync(
+                request, cancellationToken);
 
-        if (result.Genre == null)
+            return Created("/api/genres", genre);
+        }
+        catch (ArgumentException ex)
         {
-            return BadRequest(new { message = result.Error });
+            return BadRequest(new { message = ex.Message });
         }
-
-        return Created("/api/genres", result.Genre);
     }
 
+    // PUT: api/genres/{id}
     [HttpPut("{id:guid}")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> UpdateGenre(
@@ -61,57 +57,45 @@ public class GenresController : ControllerBase
         [FromBody] GenreRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
+        if (request == null || string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(new
-            {
-                message = "Tên thể loại không được để trống."
-            });
+            return BadRequest(new { message = "Tên thể loại không được để trống." });
         }
 
-        var result = await _movieService.UpdateGenreAsync(
-            id,
-            request.Name,
-            cancellationToken);
-
-        if (result.NotFound)
+        try
         {
-            return NotFound(new { message = result.Error });
-        }
+            var genre = await _movieService.UpdateGenreAsync(
+                id, request, cancellationToken);
 
-        if (result.Conflict)
+            return genre == null
+                ? NotFound(new { message = "Không tìm thấy thể loại." })
+                : Ok(genre);
+        }
+        catch (ArgumentException ex)
         {
-            return Conflict(new { message = result.Error });
+            return BadRequest(new { message = ex.Message });
         }
-
-        if (result.Genre == null)
-        {
-            return BadRequest(new { message = result.Error });
-        }
-
-        return Ok(result.Genre);
     }
 
+    // DELETE: api/genres/{id}
     [HttpDelete("{id:guid}")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteGenre(
         Guid id,
         CancellationToken cancellationToken = default)
     {
-        var result = await _movieService.DeleteGenreAsync(
-            id,
-            cancellationToken);
-
-        if (result.NotFound)
+        try
         {
-            return NotFound(new { message = result.Error });
-        }
+            var deleted = await _movieService.DeleteGenreAsync(
+                id, cancellationToken);
 
-        if (result.Conflict)
+            return deleted
+                ? Ok(new { message = "Đã xóa thể loại thành công." })
+                : NotFound(new { message = "Không tìm thấy thể loại." });
+        }
+        catch (ArgumentException ex)
         {
-            return Conflict(new { message = result.Error });
+            return BadRequest(new { message = ex.Message });
         }
-
-        return NoContent();
     }
 }
