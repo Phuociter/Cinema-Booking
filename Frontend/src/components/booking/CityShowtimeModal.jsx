@@ -30,7 +30,12 @@ const matchesCity = (cinemaCity, selectedCity) => {
   const c = cinemaCity.toLowerCase().trim();
   const s = selectedCity.toLowerCase().trim();
   if (c === s) return true;
-  if (s === 'hồ chí minh' && (c.includes('hồ chí minh') || c.includes('hcm') || c.includes('sài gòn'))) return true;
+  if (s === 'hồ chí minh' && (
+    c.includes('hồ chí minh')
+    || c.includes('hcm')
+    || c.includes('sài gòn')
+    || c.includes('h? ch? minh')
+  )) return true;
   if (s === 'hà nội' && c.includes('hà nội')) return true;
   if (s === 'đà nẵng' && c.includes('đà nẵng')) return true;
   if (s === 'cần thơ' && c.includes('cần thơ')) return true;
@@ -118,7 +123,7 @@ const CityShowtimeModal = ({ isOpen, onClose, movie, initialDate }) => {
           pageSize: 100 // Lấy tối đa 100 suất chiếu để nạp đầy đủ rạp
         });
 
-        setShowtimes(data?.items || []);
+        setShowtimes(data?.data?.items ?? data?.items ?? []);
       } catch (err) {
         console.error('Lỗi khi tải lịch chiếu cho modal:', err);
         setShowtimes([]);
@@ -229,11 +234,7 @@ const CityShowtimeModal = ({ isOpen, onClose, movie, initialDate }) => {
                   <Clock className="w-3.5 h-3.5 text-gray-400" />
                   {movie.durationMin || 90} phút
                 </span>
-                {movie.ratingScore && (
-                  <span className="text-xs text-amber-400 font-semibold flex items-center gap-1">
-                    ★ {Number(movie.ratingScore).toFixed(1)}
-                  </span>
-                )}
+
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wide mb-1">
                 {movie.title}

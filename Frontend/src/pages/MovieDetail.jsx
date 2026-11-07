@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
-  Star, 
   Clock, 
   MapPin, 
   Ticket, 
@@ -196,12 +195,7 @@ const MovieDetail = () => {
                   <Clock className="w-4 h-4 text-blue-400" />
                   <span className="text-sm font-medium">{movie.durationMin || 'N/A'} phút</span>
                 </div>
-                <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/10">
-                  <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                  <span className="text-sm font-medium">
-                    {movie.ratingScore ? movie.ratingScore.toFixed(1) : 'Chưa có'} điểm
-                  </span>
-                </div>
+
                 <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/10">
                   <Film className="w-4 h-4 text-green-400" />
                   <span className="text-sm font-medium">{genreListText}</span>
@@ -270,7 +264,7 @@ const MovieDetail = () => {
             </div>
             <div className="space-y-3">
               <p><strong>Phân loại độ tuổi:</strong> {movie.ageRating || 'P - Phổ biến mọi lứa tuổi'}</p>
-              <p><strong>Điểm đánh giá:</strong> {movie.ratingScore ? `${movie.ratingScore.toFixed(1)} / 5.0` : 'Chưa có đánh giá'}</p>
+
               <p><strong>Trạng thái:</strong> {movie.status === 'now_showing' ? 'Đang chiếu rạp' : 'Sắp khởi chiếu'}</p>
             </div>
           </div>

@@ -11,7 +11,7 @@ using MovieBooking.Data.Repositories.Interfaces;
 using MovieBooking.Service.Interfaces;
 using MovieBooking.Service.Mappings;
 using MovieBooking.Service.Services;
-
+using MovieBooking.API.Hubs;
 var builder = WebApplication.CreateBuilder(args);
 
 // Tự động nạp biến môi trường từ file .env nếu có
@@ -19,6 +19,7 @@ LoadDotEnv(builder);
 
 // 1. Add Controllers & Swagger with JWT Bearer
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -54,7 +55,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
     ?? "Host=localhost;Port=5432;Database=cinema_db;Username=postgres;Password=postgres";
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connectionString).UseSnakeCaseNamingConvention());
+options.UseNpgsql(connectionString));
 
 // 3. Register AutoMapper
 builder.Services.AddAutoMapper(cfg => cfg.AddProfile<MappingProfile>());
@@ -63,6 +64,9 @@ builder.Services.AddAutoMapper(cfg => cfg.AddProfile<MappingProfile>());
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IShowtimeRepository, ShowtimeRepository>();
 builder.Services.AddScoped<IShowtimeSeatRepository, ShowtimeSeatRepository>();
+builder.Services.AddScoped<IBookingRepository, BookingRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IReportRepository, ReportRepository>();
 
 // 5. Register Redis Cache (Singleton)
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
@@ -77,9 +81,15 @@ builder.Services.AddSingleton<IRedisService, RedisService>();
 // 6. Register Application Services
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
+builder.Services.AddScoped<IShowtimeSeatService, ShowtimeSeatService>();
 builder.Services.AddScoped<ISnackService, SnackService>();
 builder.Services.AddScoped<ICinemaService, CinemaService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+builder.Services.AddScoped<IAvatarStorage, AvatarStorage>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddHttpClient<IAuthService, AuthService>();
+builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IAdminBookingService, AdminBookingService>();
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddScoped<SmtpEmailSender>();
@@ -166,7 +176,11 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
-
+using (var scope = builder.Services.BuildServiceProvider().CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
 var app = builder.Build();
 
 // Configure HTTP request pipeline
@@ -195,7 +209,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
+app.MapHub<MovieHub>("/hubs/movies");
 app.Run();
 
 static string[] ResolveAllowedOrigins(IConfiguration configuration)

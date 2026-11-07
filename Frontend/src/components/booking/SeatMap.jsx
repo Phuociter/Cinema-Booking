@@ -30,6 +30,21 @@ function groupSeatsByRow(seats) {
   return map;
 }
 
+function isCoupleSeat(seat) {
+  const typeName = (seat?.seatTypeName || '').toLowerCase();
+  return typeName.includes('couple') || typeName.includes('đôi') || seat?.rowLabel === 'F';
+}
+
+function findCouplePartner(seat, allSeats) {
+  if (!isCoupleSeat(seat)) return null;
+  const partnerCol = seat.columnNumber % 2 === 1 
+    ? seat.columnNumber + 1 
+    : seat.columnNumber - 1;
+  return allSeats.find(
+    (s) => s.rowLabel === seat.rowLabel && s.columnNumber === partnerCol
+  ) || null;
+}
+
 const SeatMap = ({ showtimeId, selectedSeats: externalSelectedSeats, onSeatSelected, maxSeats = 8 }) => {
   const [seats, setSeats] = useState([]);
   const [internalSelectedSeats, setInternalSelectedSeats] = useState([]);
@@ -66,16 +81,31 @@ const SeatMap = ({ showtimeId, selectedSeats: externalSelectedSeats, onSeatSelec
   const handleSeatClick = (seat) => {
     if (seat.status === 'reserved') return;
 
+    // Tìm ghế cặp đôi đi kèm nếu là ghế Couple (cùng hàng, cặp cột 1-2, 3-4, 5-6, 7-8...)
+    const partnerSeat = findCouplePartner(seat, seats);
+    if (partnerSeat && partnerSeat.status === 'reserved') {
+      alert(`Ghế đôi đi kèm (${partnerSeat.seatCode}) đã có người đặt, không thể chọn ghế này.`);
+      return;
+    }
+
     const isSelected = selectedSeats.some((s) => s.id === seat.id);
     let updated;
     if (isSelected) {
-      updated = selectedSeats.filter((s) => s.id !== seat.id);
+      // Hủy chọn đồng thời cả 2 ghế của cặp đôi
+      const idsToRemove = new Set([seat.id]);
+      if (partnerSeat) idsToRemove.add(partnerSeat.id);
+      updated = selectedSeats.filter((s) => !idsToRemove.has(s.id));
     } else {
-      if (selectedSeats.length >= maxSeats) {
+      // Chọn đồng thời cả 2 ghế của cặp đôi
+      const seatsToAdd = partnerSeat ? [seat, partnerSeat] : [seat];
+      const existingIds = new Set(selectedSeats.map((s) => s.id));
+      const newSeats = seatsToAdd.filter((s) => !existingIds.has(s.id));
+
+      if (selectedSeats.length + newSeats.length > maxSeats) {
         alert(`Chỉ được chọn tối đa ${maxSeats} ghế cho một lần đặt vé.`);
         return;
       }
-      updated = [...selectedSeats, seat];
+      updated = [...selectedSeats, ...newSeats];
     }
 
     if (!isControlled) {
@@ -131,6 +161,8 @@ const SeatMap = ({ showtimeId, selectedSeats: externalSelectedSeats, onSeatSelec
               {(seatsByRow[rowLabel] ?? []).map((seat) => {
                 const isReserved = seat.status === 'reserved';
                 const isSelected = selectedSeats.some((s) => s.id === seat.id);
+                const isCouple = isCoupleSeat(seat);
+                const isCoupleRight = isCouple && seat.columnNumber % 2 === 0;
 
                 return (
                   <button
@@ -139,7 +171,7 @@ const SeatMap = ({ showtimeId, selectedSeats: externalSelectedSeats, onSeatSelec
                     disabled={isReserved}
                     onClick={() => handleSeatClick(seat)}
                     title={`${seat.seatCode} (${seat.seatTypeName}) - ${seat.totalPrice?.toLocaleString('vi-VN')}đ - Trạng thái: ${isReserved ? 'Đã đặt' : isSelected ? 'Đang chọn' : 'Còn trống'}`}
-                    className={`relative w-8 h-8 md:w-10 md:h-10 rounded-lg border text-xs font-semibold flex items-center justify-center transition-all duration-200 select-none ${getSeatStyle(seat, isSelected)}`}
+                    className={`relative w-8 h-8 md:w-10 md:h-10 rounded-lg border text-xs font-semibold flex items-center justify-center transition-all duration-200 select-none ${getSeatStyle(seat, isSelected)} ${isCoupleRight ? 'mr-3 md:mr-4' : ''}`}
                   >
                     {isReserved ? (
                       <Lock className="w-3.5 h-3.5 text-slate-500" />

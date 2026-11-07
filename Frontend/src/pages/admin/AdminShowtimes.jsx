@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { Plus } from 'lucide-react';
-import { PageHeader, EmptyState, Pagination } from '../../components/admin/ui';
+import { PageHeader, EmptyState, Pagination, TableContainer } from '../../components/admin/ui';
 import {
   ShowtimeFilters, ShowtimeTable, ShowtimeTimeline, ShowtimeDetailPanel,
   CreateShowtimeModal, SeatMapModal, useShowtimeList,
@@ -34,10 +34,23 @@ export default function AdminShowtimes() {
     axiosInstance.get('/movies?page=1&pageSize=100').then((res) => setMovies(res?.data?.items || [])).catch(() => {});
   }, []);
 
-  const filtered = useMemo(() => showtimes.filter((s) => (
-    (!filterState.auditoriumId || s.auditoriumId === filterState.auditoriumId) &&
-    (!filterState.status || s.status === filterState.status)
-  )), [showtimes, filterState.auditoriumId, filterState.status]);
+  const filtered = useMemo(() => {
+    return showtimes.filter((s) => {
+      if (filterState.city) {
+        const cinema = cinemas.find((c) => c.id === s.cinemaId || c.name === s.cinemaName);
+        if (cinema && cinema.city !== filterState.city) {
+          return false;
+        }
+      }
+      if (filterState.auditoriumId && s.auditoriumId !== filterState.auditoriumId) {
+        return false;
+      }
+      if (filterState.status && s.status !== filterState.status) {
+        return false;
+      }
+      return true;
+    });
+  }, [showtimes, filterState.city, filterState.auditoriumId, filterState.status, cinemas]);
 
   useEffect(() => {
     setSelectedShowtime((prev) => filtered.find((s) => s.id === prev?.id) || filtered[0] || null);
@@ -131,28 +144,12 @@ export default function AdminShowtimes() {
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-3 items-stretch h-[calc(100vh-185px)] min-h-[420px]">
           {/* Cột trái: Khung Table tĩnh (Header và Pagination đứng yên, Data cuộn bên trong) */}
           {viewMode === 'table' ? (
-            <div className="flex flex-col h-full min-h-0 rounded-md border border-zinc-800 bg-zinc-950 overflow-hidden shadow-lg shadow-black/40">
-              {/* Vùng cuộn dữ liệu: Co giãn linh hoạt chiếm trọn chiều cao, header sticky top, pagination ở đáy */}
-              <div ref={tableContainerRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-auto relative scroll-smooth">
-                {isLoading && (
-                  <div className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[1px] flex items-center justify-center text-xs text-zinc-300 z-20">
-                    <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-700 px-3 py-1.5 rounded-md shadow-lg">
-                      <span className="h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                      <span>Đang tải trang mới...</span>
-                    </div>
-                  </div>
-                )}
-                <ShowtimeTable
-                  showtimes={filtered}
-                  selectedId={selectedShowtime?.id}
-                  onSelectShowtime={setSelectedShowtime}
-                  onCancelClick={setCancelTarget}
-                  onRestoreClick={setRestoreTarget}
-                />
-              </div>
-
-              {/* Phân trang đứng yên cố định ở đáy table */}
-              <div className="border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm px-4 py-2.5 z-10 shrink-0">
+            <TableContainer
+              className="h-full"
+              containerRef={tableContainerRef}
+              isLoading={isLoading}
+              loadingText="Đang tải trang mới..."
+              pagination={
                 <Pagination
                   page={page}
                   pageSize={pageSize}
@@ -162,29 +159,37 @@ export default function AdminShowtimes() {
                   onPageSizeChange={handlePageSizeChange}
                   disabled={isLoading}
                 />
-                {serverPageSize && (
+              }
+              footer={
+                serverPageSize && (
                   <div className="text-[10px] text-zinc-500 italic mt-1">
                     Máy chủ đang giới hạn tối đa {serverPageSize} dòng mỗi trang
                   </div>
-                )}
-              </div>
-            </div>
+                )
+              }
+            >
+              <ShowtimeTable
+                showtimes={filtered}
+                selectedId={selectedShowtime?.id}
+                onSelectShowtime={setSelectedShowtime}
+                onCancelClick={setCancelTarget}
+                onRestoreClick={setRestoreTarget}
+              />
+            </TableContainer>
           ) : (
             /* Chế độ Lịch theo phòng (Timeline) */
-            <div className="flex flex-col h-full min-h-0 rounded-md border border-zinc-800 bg-zinc-950 overflow-hidden shadow-lg shadow-black/40">
-              <div ref={tableContainerRef} className="flex-1 min-h-0 overflow-auto relative">
-                {isLoading && (
-                  <div className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[1px] flex items-center justify-center text-xs text-zinc-300 z-10">
-                    Đang tải trang mới...
-                  </div>
-                )}
-                <ShowtimeTimeline
-                  showtimes={filtered}
-                  selectedId={selectedShowtime?.id}
-                  onSelectShowtime={setSelectedShowtime}
-                />
-              </div>
-            </div>
+            <TableContainer
+              className="h-full"
+              containerRef={tableContainerRef}
+              isLoading={isLoading}
+              loadingText="Đang tải trang mới..."
+            >
+              <ShowtimeTimeline
+                showtimes={filtered}
+                selectedId={selectedShowtime?.id}
+                onSelectShowtime={setSelectedShowtime}
+              />
+            </TableContainer>
           )}
 
           <ShowtimeDetailPanel

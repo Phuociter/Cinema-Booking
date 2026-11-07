@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BadgeCheck, LockKeyhole, Pencil, Plus, RotateCcw, Search, Shield, Trash2, Users, X } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, LockKeyhole, Pencil, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import { accountApi } from '../../api/useAccount';
 import UserAvatar from '../../components/UserAvatar';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useAuth } from '../../auth/AuthContext';
+import { EmptyState, PageHeader, Pagination, TableContainer } from '../../components/admin/ui';
+import UserOrdersModal from '../../components/admin/users/UserOrdersModal';
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE_OPTIONS = [15, 50, 100];
+const PAGE_SIZE = PAGE_SIZE_OPTIONS[0];
 const ROLE_OPTIONS = [
   { value: 'Customer', label: 'Khách hàng', description: 'Đặt vé và quản lý tài khoản cá nhân.' },
   { value: 'Staff', label: 'Nhân viên', description: 'Hỗ trợ vận hành quầy vé.' },
@@ -36,6 +39,7 @@ const AdminUsers = () => {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [pageInfo, setPageInfo] = useState({ totalCount: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -49,6 +53,7 @@ const AdminUsers = () => {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [action, setAction] = useState(null);
+  const [ordersUser, setOrdersUser] = useState(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [form, setForm] = useState({
     fullName: '',
@@ -74,7 +79,7 @@ const AdminUsers = () => {
     try {
       const result = await accountApi.getAdminUsers({
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         search: debouncedSearch || undefined,
         role: roleFilter || undefined,
         status: statusFilter || undefined,
@@ -91,7 +96,7 @@ const AdminUsers = () => {
     } finally {
       if (requestId === listRequestId.current) setIsLoading(false);
     }
-  }, [page, debouncedSearch, roleFilter, statusFilter]);
+  }, [page, pageSize, debouncedSearch, roleFilter, statusFilter]);
 
   useEffect(() => {
     loadUsers();
@@ -144,6 +149,11 @@ const AdminUsers = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (modalMode === 'edit' && isSelf(editingUser ?? {}) && form.role !== 'Admin') {
+      toast.error('Không thể tự tước quyền Quản trị viên của tài khoản đang sử dụng.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       if (modalMode === 'create') {
@@ -175,10 +185,33 @@ const AdminUsers = () => {
     }
   };
 
-  const openAction = (targetUser, type) => setAction({ user: targetUser, type });
+  const isSelf = (targetUser) => currentUser?.id?.toLowerCase() === targetUser.id?.toLowerCase();
+
+  const openAction = (targetUser, type) => {
+    if (type === 'lock' && isSelf(targetUser)) {
+      toast.error('Không thể tự khóa tài khoản đang sử dụng.');
+      return;
+    }
+    if (type === 'hardDelete' && (isSelf(targetUser) || targetUser.bookingsCount !== 0)) {
+      toast.error('Chỉ được xóa vĩnh viễn tài khoản không có đơn vé và không phải tài khoản đang sử dụng.');
+      return;
+    }
+    setAction({ user: targetUser, type });
+  };
 
   const performAction = async () => {
     if (!action) return;
+    if (action.type === 'lock' && isSelf(action.user)) {
+      toast.error('Không thể tự khóa tài khoản đang sử dụng.');
+      setAction(null);
+      return;
+    }
+    if (action.type === 'hardDelete' && (isSelf(action.user) || action.user.bookingsCount !== 0)) {
+      toast.error('Chỉ được xóa vĩnh viễn tài khoản không có đơn vé và không phải tài khoản đang sử dụng.');
+      setAction(null);
+      return;
+    }
+
     setIsActionLoading(true);
     try {
       if (action.type === 'restore') {
@@ -223,32 +256,33 @@ const AdminUsers = () => {
     };
   }, [action]);
 
-  const isSelf = (targetUser) => currentUser?.id?.toLowerCase() === targetUser.id?.toLowerCase();
+  const canViewOrders = (targetUser) => {
+    const roles = (targetUser.roles ?? []).map((role) => role.toLowerCase());
+    return roles.some((role) => ['customer', 'staff'].includes(role)) && !roles.includes('admin');
+  };
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-4 py-10 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
-          <div>
-            <Link to="/admin" className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-red-300 hover:text-red-200">
-              <ArrowLeft className="h-4 w-4" /> Admin Portal
-            </Link>
-            <h1 className="text-3xl font-bold tracking-tight">Quản lý người dùng</h1>
-            <p className="mt-2 text-sm text-slate-400">
-              Quản lý khách hàng, nhân viên và tài khoản quản trị.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={startCreate}
-            disabled={isDetailLoading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 font-semibold text-white transition hover:bg-red-500 disabled:opacity-60"
-          >
-            <Plus className="h-5 w-5" /> Thêm người dùng
-          </button>
-        </header>
+    <main className="min-h-screen bg-zinc-950 text-white">
+      <div className="mx-auto max-w-7xl space-y-2.5 px-4 py-2 sm:px-6 sm:py-3">
+      <PageHeader
+        title="Quản lý người dùng"
+        description="Quản lý khách hàng, nhân viên và tài khoản quản trị."
+        badge={`${pageInfo.totalCount} tài khoản`}
+      >
+        <Link to="/admin" className="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800 hover:text-white">
+          <ArrowLeft className="h-3.5 w-3.5" /> Admin Portal
+        </Link>
+        <button
+          type="button"
+          onClick={startCreate}
+          disabled={isDetailLoading}
+          className="inline-flex items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-primary/30 transition hover:bg-primary-dull disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Plus className="h-4 w-4" /> Thêm người dùng
+        </button>
+      </PageHeader>
 
-        <section className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 md:grid-cols-[minmax(240px,1fr)_190px_190px]">
+      <section className="grid gap-3 rounded-md border border-zinc-800 bg-zinc-950/70 p-3 md:grid-cols-[minmax(240px,1fr)_190px_190px]">
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
@@ -278,142 +312,151 @@ const AdminUsers = () => {
             <option value="active">Đang hoạt động</option>
             <option value="locked">Đã khóa</option>
           </select>
-        </section>
+      </section>
 
-        <section className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/70">
-          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <Users className="h-4 w-4 text-red-300" /> Danh sách tài khoản
-            </div>
-            <span className="text-xs text-slate-400">{pageInfo.totalCount} tài khoản</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1120px] text-left text-sm">
-              <thead className="bg-white/[0.03] text-xs uppercase tracking-wide text-slate-400">
-                <tr>
-                  <th className="px-5 py-3 font-medium">Người dùng</th>
-                  <th className="px-4 py-3 font-medium">Điện thoại</th>
-                  <th className="px-4 py-3 font-medium">Tài khoản</th>
-                  <th className="px-4 py-3 font-medium">Vai trò</th>
-                  <th className="px-4 py-3 font-medium">Đơn vé / Chi tiêu</th>
-                  <th className="px-4 py-3 font-medium">Trạng thái</th>
-                  <th className="px-5 py-3 text-right font-medium">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/[0.06]">
-                {isLoading ? (
-                  <tr><td colSpan="7" className="px-5 py-14 text-center text-slate-400">Đang tải danh sách...</td></tr>
-                ) : users.length === 0 ? (
-                  <tr><td colSpan="7" className="px-5 py-14 text-center text-slate-400">Không tìm thấy người dùng phù hợp.</td></tr>
-                ) : users.map((item) => (
-                  <tr key={item.id} className="transition hover:bg-white/[0.025]">
-                    <td className="px-5 py-4">
-                      <div className="flex min-w-64 items-center gap-3">
-                        <UserAvatar src={item.avatarUrl} name={item.fullName || item.email} className="h-10 w-10 text-sm" />
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-white">{item.fullName || 'Chưa cập nhật tên'}</p>
-                          <p className="truncate text-xs text-slate-400">{item.email}</p>
-                          <p className="mt-1 text-[11px] text-slate-500">Tạo {formatDate(item.createdAt)}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-slate-300">{item.phone || '—'}</td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${item.authProvider?.toLowerCase() === 'clerk' ? 'border-violet-500/30 bg-violet-500/10 text-violet-300' : 'border-slate-500/30 bg-slate-500/10 text-slate-300'}`}>
-                        {item.authProvider?.toLowerCase() === 'clerk' ? <BadgeCheck className="h-3.5 w-3.5" /> : <LockKeyhole className="h-3.5 w-3.5" />}
-                        {item.authProvider?.toLowerCase() === 'clerk' ? 'Clerk / Google' : 'Local'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex max-w-44 flex-wrap gap-1.5">
-                        {(item.roles ?? []).map((role) => (
-                          <span key={role} className={`rounded-full border px-2.5 py-1 text-xs ${roleStyles[role] ?? roleStyles.Customer}`}>
-                            {getRoleLabel(role)}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <p className="font-medium text-white">{item.bookingsCount} đơn</p>
-                      <p className="mt-1 text-xs text-slate-400">{formatMoney(item.totalSpent)}</p>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.isActive ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'}`}>
-                        {item.isActive ? 'Hoạt động' : 'Đã khóa'}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => startEdit(item.id)}
-                          disabled={isDetailLoading}
-                          title="Chỉnh sửa người dùng"
-                          className="rounded-lg border border-white/10 p-2 text-slate-300 transition hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-300 disabled:opacity-50"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        {item.isActive ? (
-                          <button
-                            type="button"
-                            onClick={() => openAction(item, 'lock')}
-                            disabled={isSelf(item)}
-                            title={isSelf(item) ? 'Không thể tự khóa tài khoản đang sử dụng' : 'Khóa tài khoản'}
-                            className="rounded-lg border border-white/10 p-2 text-amber-300 transition hover:border-amber-400/40 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <LockKeyhole className="h-4 w-4" />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => openAction(item, 'restore')}
-                            title="Khôi phục tài khoản"
-                            className="rounded-lg border border-white/10 p-2 text-emerald-300 transition hover:border-emerald-400/40 hover:bg-emerald-500/10"
-                          >
-                            <RotateCcw className="h-4 w-4" />
-                          </button>
-                        )}
-                        {item.bookingsCount === 0 && !isSelf(item) && (
-                          <button
-                            type="button"
-                            onClick={() => openAction(item, 'hardDelete')}
-                            title="Xóa vĩnh viễn tài khoản chưa có đơn vé"
-                            className="rounded-lg border border-white/10 p-2 text-red-300 transition hover:border-red-400/40 hover:bg-red-500/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <footer className="flex flex-col items-center justify-between gap-3 border-t border-white/10 px-5 py-4 text-sm sm:flex-row">
-            <p className="text-xs text-slate-400">
-              Trang {page} / {Math.max(pageInfo.totalPages, 1)}
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((value) => Math.max(1, value - 1))}
-                disabled={page <= 1 || isLoading}
-                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+      <TableContainer
+        className="h-[calc(100vh-185px)] min-h-[420px]"
+        isLoading={isLoading}
+        loadingText="Đang tải danh sách người dùng..."
+        pagination={(
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            total={pageInfo.totalCount}
+            itemCount={users.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+            disabled={isLoading}
+          />
+        )}
+      >
+        <table className="w-full min-w-[1120px] text-left text-sm">
+          <thead className="text-xs uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="sticky top-0 z-10 bg-zinc-900 px-5 py-3 font-medium">Người dùng</th>
+              <th className="sticky top-0 z-10 bg-zinc-900 px-4 py-3 font-medium">Điện thoại</th>
+              <th className="sticky top-0 z-10 bg-zinc-900 px-4 py-3 font-medium">Tài khoản</th>
+              <th className="sticky top-0 z-10 bg-zinc-900 px-4 py-3 font-medium">Vai trò</th>
+              <th className="sticky top-0 z-10 bg-zinc-900 px-4 py-3 font-medium">Đơn vé / Chi tiêu</th>
+              <th className="sticky top-0 z-10 bg-zinc-900 px-4 py-3 font-medium">Trạng thái</th>
+              <th className="sticky top-0 z-10 bg-zinc-900 px-5 py-3 text-right font-medium">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.06]">
+            {users.length === 0 && !isLoading ? (
+              <tr>
+                <td colSpan="7" className="p-5">
+                  <EmptyState
+                    title="Không tìm thấy người dùng phù hợp"
+                    description="Thử thay đổi từ khóa tìm kiếm hoặc bộ lọc."
+                  />
+                </td>
+              </tr>
+            ) : users.map((item) => (
+              <tr
+                key={item.id}
+                onClick={() => canViewOrders(item) && setOrdersUser(item)}
+                onKeyDown={(event) => {
+                  if (canViewOrders(item) && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    setOrdersUser(item);
+                  }
+                }}
+                tabIndex={canViewOrders(item) ? 0 : undefined}
+                aria-label={canViewOrders(item) ? `Xem lịch sử đơn vé của ${item.fullName || item.email}` : undefined}
+                className={`transition hover:bg-white/[0.025] ${canViewOrders(item) ? 'cursor-pointer focus:bg-white/[0.05] focus:outline-none' : ''}`}
               >
-                Trước
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage((value) => Math.min(pageInfo.totalPages, value + 1))}
-                disabled={pageInfo.totalPages === 0 || page >= pageInfo.totalPages || isLoading}
-                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Tiếp
-              </button>
-            </div>
-          </footer>
-        </section>
+                <td className="px-5 py-4">
+                  <div className="flex min-w-64 items-center gap-3">
+                    <UserAvatar src={item.avatarUrl} name={item.fullName || item.email} className="h-10 w-10 text-sm" />
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-white">{item.fullName || 'Chưa cập nhật tên'}</p>
+                      <p className="truncate text-xs text-slate-400">{item.email}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">Tạo {formatDate(item.createdAt)}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-4 text-slate-300">{item.phone || '—'}</td>
+                <td className="px-4 py-4">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${item.authProvider?.toLowerCase() === 'clerk' ? 'border-violet-500/30 bg-violet-500/10 text-violet-300' : 'border-slate-500/30 bg-slate-500/10 text-slate-300'}`}>
+                    {item.authProvider?.toLowerCase() === 'clerk' ? <BadgeCheck className="h-3.5 w-3.5" /> : <LockKeyhole className="h-3.5 w-3.5" />}
+                    {item.authProvider?.toLowerCase() === 'clerk' ? 'Clerk / Google' : 'Nội bộ'}
+                  </span>
+                </td>
+                <td className="px-4 py-4">
+                  <div className="flex max-w-44 flex-wrap gap-1.5">
+                    {(item.roles ?? []).map((role) => (
+                      <span key={role} className={`rounded-full border px-2.5 py-1 text-xs ${roleStyles[role] ?? roleStyles.Customer}`}>
+                        {getRoleLabel(role)}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-4 py-4">
+                  <p className="font-medium text-white">{item.bookingsCount ?? 0} đơn</p>
+                  <p className="mt-1 text-xs text-slate-400">{formatMoney(item.totalSpent)}</p>
+                </td>
+                <td className="px-4 py-4">
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${item.isActive ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'}`}>
+                    {item.isActive ? 'Hoạt động' : 'Đã khóa'}
+                  </span>
+                </td>
+                <td
+                  className="px-5 py-4"
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(item.id)}
+                      disabled={isDetailLoading}
+                      title="Chỉnh sửa người dùng"
+                      className="rounded-lg border border-white/10 p-2 text-slate-300 transition hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-300 disabled:opacity-50"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    {item.isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => openAction(item, 'lock')}
+                        disabled={isSelf(item)}
+                        title={isSelf(item) ? 'Không thể tự khóa tài khoản đang sử dụng' : 'Khóa tài khoản'}
+                        className="rounded-lg border border-white/10 p-2 text-amber-300 transition hover:border-amber-400/40 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <LockKeyhole className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openAction(item, 'restore')}
+                        title="Khôi phục tài khoản"
+                        className="rounded-lg border border-white/10 p-2 text-emerald-300 transition hover:border-emerald-400/40 hover:bg-emerald-500/10"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </button>
+                    )}
+                    {item.bookingsCount === 0 && !isSelf(item) && (
+                      <button
+                        type="button"
+                        onClick={() => openAction(item, 'hardDelete')}
+                        title="Xóa vĩnh viễn tài khoản chưa có đơn vé"
+                        className="rounded-lg border border-white/10 p-2 text-red-300 transition hover:border-red-400/40 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableContainer>
       </div>
 
       {modalMode && (
@@ -544,6 +587,12 @@ const AdminUsers = () => {
         onConfirm={performAction}
         onCancel={() => !isActionLoading && setAction(null)}
       />
+      {ordersUser && (
+        <UserOrdersModal
+          user={ordersUser}
+          onClose={() => setOrdersUser(null)}
+        />
+      )}
     </main>
   );
 };

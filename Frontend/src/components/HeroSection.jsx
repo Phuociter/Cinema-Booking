@@ -106,20 +106,11 @@ const HeroSection = () => {
           <span className="px-3 py-1 bg-red-600/90 text-white rounded-full text-xs font-black uppercase tracking-wider shadow-lg shadow-red-600/30 flex items-center gap-1.5">
             <Film className="w-3.5 h-3.5" /> Phim Chiếu Rạp Nổi Bật
           </span>
-          <span className="text-amber-400 font-semibold text-xs tracking-wider">
-            ⭐ {ratingStr} ĐÁNH GIÁ
-          </span>
         </div>
 
         <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold text-white mb-3 leading-tight tracking-tight">
           {currentMovie?.title || 'Phim Bom Tấn'}
         </h1>
-
-        {currentMovie?.originalTitle && currentMovie.originalTitle !== currentMovie.title && (
-          <p className="text-slate-400 font-mono text-sm md:text-base -mt-1 mb-4 italic">
-            {currentMovie.originalTitle}
-          </p>
-        )}
 
         <p className="text-slate-300 text-base md:text-lg mb-6 line-clamp-3 leading-relaxed max-w-2xl">
           {currentMovie?.overview || 'Khám phá câu chuyện điện ảnh đặc sắc với những tình tiết kịch tính cùng trải nghiệm rạp chiếu phim đỉnh cao.'}

@@ -13,11 +13,48 @@ const Favorites = () => {
   const [filteredFavorites, setFilteredFavorites] = useState([]);
 
   // Load favorites from localStorage
-  useEffect(() => {
-    const storedFavorites = JSON.parse(localStorage.getItem('favorites')) || [];
-    setFavorites(storedFavorites);
-    setLoading(false);
-  }, []);
+
+
+    // Load and synchronize favorites from localStorage
+    useEffect(() => {
+        const loadFavorites = () => {
+            try {
+                const stored = JSON.parse(
+                    localStorage.getItem('cinema_favorites') || '[]'
+                );
+
+                setFavorites(Array.isArray(stored) ? stored : []);
+            } catch (error) {
+                console.error(
+                    'Không thể đọc danh sách yêu thích:',
+                    error
+                );
+                setFavorites([]);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadFavorites();
+
+        window.addEventListener(
+            'cinema-favorites-updated',
+            loadFavorites
+        );
+
+        window.addEventListener('storage', loadFavorites);
+
+        return () => {
+            window.removeEventListener(
+                'cinema-favorites-updated',
+                loadFavorites
+            );
+
+            window.removeEventListener('storage', loadFavorites);
+        };
+    }, []);
+
+
 
   // Filter favorites based on search query
   useEffect(() => {
@@ -31,11 +68,36 @@ const Favorites = () => {
   }, [favorites, searchQuery]);
 
   // Handle remove from favorites
-  const handleRemoveFavorite = (movieId) => {
-    const newFavorites = favorites.filter(movie => movie._id !== movieId);
-    setFavorites(newFavorites);
-    localStorage.setItem('favorites', JSON.stringify(newFavorites));
-  };
+
+
+
+    const handleRemoveFavorite = (movieId) => {
+        const newFavorites = favorites.filter(
+            (movie) =>
+                String(movie._id ?? movie.id) !== String(movieId)
+        );
+
+        try {
+            localStorage.setItem(
+                'cinema_favorites',
+                JSON.stringify(newFavorites)
+            );
+
+            setFavorites(newFavorites);
+
+            window.dispatchEvent(
+                new Event('cinema-favorites-updated')
+            );
+        } catch (error) {
+            console.error(
+                'Không thể cập nhật danh sách yêu thích:',
+                error
+            );
+        }
+    };
+
+
+
 
   if (loading) {
     return (
@@ -148,12 +210,14 @@ const Favorites = () => {
             mb-12
           `}>
             {filteredFavorites.map((movie) => (
-              <div key={movie._id} className={viewMode === 'list' ? 'transform transition-all duration-300 hover:scale-[1.02]' : ''}>
-                <MovieCard
-                  movie={movie}
-                  viewMode={viewMode}
-                  onRemove={() => handleRemoveFavorite(movie._id)}
-                />
+                <div key={movie._id ?? movie.id} className={viewMode === 'list' ? 'transform transition-all duration-300 hover:scale-[1.02]' : ''}>
+
+                    <MovieCard
+                        movie={movie}
+                        viewMode={viewMode}
+                        onRemove={() => handleRemoveFavorite(movie._id ?? movie.id)}
+                    />
+
               </div>
             ))}
           </div>

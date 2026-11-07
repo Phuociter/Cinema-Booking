@@ -10,4 +10,9 @@ public interface IScheduleService
     Task<ShowtimeDto?> GetShowtimeByIdAsync(Guid id);
     Task<IEnumerable<ShowtimeSeatDto>> GetSeatsForShowtimeAsync(Guid showtimeId);
     Task<bool> ShowtimeExistsAsync(Guid id);
+
+    // Refactored methods
+    Task<CancelShowtimeResult> CancelShowtimeAsync(Guid id);
+    Task<RestoreShowtimeResult> RestoreShowtimeAsync(Guid id);
+    Task<CreateShowtimeResult> CreateShowtimeAsync(CreateShowtimeRequest request);
 }
