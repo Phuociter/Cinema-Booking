@@ -1,21 +1,23 @@
 using AutoMapper;
-using AutoMapper.QueryableExtensions;
-using Microsoft.EntityFrameworkCore;
-using MovieBooking.Data;
 using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories;
 using MovieBooking.Service.DTOs;
 using MovieBooking.Service.Interfaces;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace MovieBooking.Service.Services
 {
     public class SnackService : ISnackService
     {
-        private readonly AppDbContext _context;
+        private readonly ISnackRepository _snackRepository;
         private readonly IMapper _mapper;
 
-        public SnackService(AppDbContext context, IMapper mapper)
+        // DI inject Repository thay vì DbContext
+        public SnackService(ISnackRepository snackRepository, IMapper mapper)
         {
-            _context = context;
+            _snackRepository = snackRepository;
             _mapper = mapper;
         }
 
@@ -24,11 +26,8 @@ namespace MovieBooking.Service.Services
         // ==========================================
         public async Task<IEnumerable<SnackDto>> GetAllSnacksAsync()
         {
-            return await _context.Snacks
-                .AsNoTracking()
-                .Where(s => s.DeletedAt == null) // Bỏ qua các món đã xóa mềm
-                .ProjectTo<SnackDto>(_mapper.ConfigurationProvider)
-                .ToListAsync();
+            var snacks = await _snackRepository.GetAllActiveSnacksAsync();
+            return _mapper.Map<IEnumerable<SnackDto>>(snacks);
         }
 
         public async Task<SnackDto> CreateSnackAsync(SnackDto snackDto)
@@ -41,32 +40,30 @@ namespace MovieBooking.Service.Services
                 Description = snackDto.Description
             };
 
-            _context.Snacks.Add(snack);
-            await _context.SaveChangesAsync();
-
+            await _snackRepository.AddSnackAsync(snack);
             return _mapper.Map<SnackDto>(snack);
         }
 
         public async Task<bool> UpdateSnackAsync(Guid id, SnackDto snackDto)
         {
-            var snack = await _context.Snacks.FirstOrDefaultAsync(s => s.Id == id && s.DeletedAt == null);
+            var snack = await _snackRepository.GetActiveSnackByIdAsync(id);
             if (snack == null) return false;
 
             snack.Name = snackDto.Name ?? snack.Name;
             snack.ImageUrl = snackDto.ImageUrl;
             snack.Description = snackDto.Description;
 
-            await _context.SaveChangesAsync();
+            await _snackRepository.UpdateAsync();
             return true;
         }
 
         public async Task<bool> DeleteSnackAsync(Guid id)
         {
-            var snack = await _context.Snacks.FirstOrDefaultAsync(s => s.Id == id);
+            var snack = await _snackRepository.GetSnackByIdAsync(id);
             if (snack == null) return false;
 
-            snack.DeletedAt = DateTime.UtcNow; // Xóa mềm để giữ lịch sử hóa đơn cũ
-            await _context.SaveChangesAsync();
+            snack.DeletedAt = DateTime.UtcNow; // Xóa mềm
+            await _snackRepository.UpdateAsync();
             return true;
         }
 
@@ -75,26 +72,14 @@ namespace MovieBooking.Service.Services
         // ==========================================
         public async Task<IEnumerable<CinemaSnackDto>> GetSnacksByCinemaAsync(Guid cinemaId, bool onlyAvailable = false)
         {
-            var query = _context.CinemaSnacks
-                .Include(cs => cs.Snack)
-                .AsNoTracking()
-                .Where(cs => cs.CinemaId == cinemaId && cs.Snack.DeletedAt == null);
-
-            // Nếu gọi từ Client (đặt vé) thì truyền true, gọi từ Admin (quản lý) thì truyền false
-            if (onlyAvailable)
-            {
-                query = query.Where(cs => cs.IsAvailable);
-            }
-
-            return await query
-                .ProjectTo<CinemaSnackDto>(_mapper.ConfigurationProvider)
-                .ToListAsync();
+            var cinemaSnacks = await _snackRepository.GetSnacksByCinemaAsync(cinemaId, onlyAvailable);
+            return _mapper.Map<IEnumerable<CinemaSnackDto>>(cinemaSnacks);
         }
 
         public async Task<bool> AddSnackToCinemaAsync(Guid cinemaId, Guid snackId, decimal price)
         {
-            var exists = await _context.CinemaSnacks.AnyAsync(cs => cs.CinemaId == cinemaId && cs.SnackId == snackId);
-            if (exists) return false; // Món này đã được thêm vào rạp rồi
+            var exists = await _snackRepository.CinemaSnackExistsAsync(cinemaId, snackId);
+            if (exists) return false;
 
             var cinemaSnack = new CinemaSnack
             {
@@ -102,37 +87,31 @@ namespace MovieBooking.Service.Services
                 CinemaId = cinemaId,
                 SnackId = snackId,
                 Price = price,
-                IsAvailable = true // Mặc định vừa thêm xong là Còn hàng
+                IsAvailable = true
             };
 
-            _context.CinemaSnacks.Add(cinemaSnack);
-            await _context.SaveChangesAsync();
+            await _snackRepository.AddCinemaSnackAsync(cinemaSnack);
             return true;
         }
 
         public async Task<bool> UpdateCinemaSnackAsync(Guid cinemaId, Guid snackId, decimal price, bool isAvailable)
         {
-            var cinemaSnack = await _context.CinemaSnacks
-                .FirstOrDefaultAsync(cs => cs.CinemaId == cinemaId && cs.SnackId == snackId);
-
+            var cinemaSnack = await _snackRepository.GetCinemaSnackAsync(cinemaId, snackId);
             if (cinemaSnack == null) return false;
 
-            cinemaSnack.Price = price; // Đổi giá
-            cinemaSnack.IsAvailable = isAvailable; // Gạt nút bật/tắt còn hàng
+            cinemaSnack.Price = price;
+            cinemaSnack.IsAvailable = isAvailable;
 
-            await _context.SaveChangesAsync();
+            await _snackRepository.UpdateAsync();
             return true;
         }
 
         public async Task<bool> RemoveSnackFromCinemaAsync(Guid cinemaId, Guid snackId)
         {
-            var cinemaSnack = await _context.CinemaSnacks
-                .FirstOrDefaultAsync(cs => cs.CinemaId == cinemaId && cs.SnackId == snackId);
-
+            var cinemaSnack = await _snackRepository.GetCinemaSnackAsync(cinemaId, snackId);
             if (cinemaSnack == null) return false;
 
-            _context.CinemaSnacks.Remove(cinemaSnack);
-            await _context.SaveChangesAsync();
+            await _snackRepository.RemoveCinemaSnackAsync(cinemaSnack);
             return true;
         }
     }

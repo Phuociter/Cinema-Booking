@@ -1,18 +1,104 @@
 import React, { useState, useEffect } from 'react';
+import toast, { Toaster } from 'react-hot-toast';
+import { Pencil, Eye, EyeOff, Plus, Loader2 } from 'lucide-react';
+import axiosInstance from '../../api/axiosInstance';
 
 const AdminSnacks = () => {
+    // ==========================================
+    // 1. CÁC STATE QUẢN LÝ DỮ LIỆU VÀ LỌC
+    // ==========================================
     const [cinemas, setCinemas] = useState([]);
     const [selectedCinemaId, setSelectedCinemaId] = useState('');
+    const [filterCategory, setFilterCategory] = useState('all'); // State bộ lọc phân loại mới
 
-    const [cinemaSnacks, setCinemaSnacks] = useState([]);
     const [masterSnacks, setMasterSnacks] = useState([]);
-
+    const [cinemaSnacks, setCinemaSnacks] = useState([]);
     const [loading, setLoading] = useState(false);
 
-    const [newSnackId, setNewSnackId] = useState('');
-    const [newSnackPrice, setNewSnackPrice] = useState('');
+    // ==========================================
+    // 2. STATE ĐIỀU KHIỂN CÁC MODAL
+    // ==========================================
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingSnack, setEditingSnack] = useState(null);
 
-    const API_BASE = 'http://localhost:5000/api';
+    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+    const [targetSnack, setTargetSnack] = useState(null);
+
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [isAdding, setIsAdding] = useState(false);
+    const [addMode, setAddMode] = useState('existing');
+    const [addFormData, setAddFormData] = useState({
+        cinemaId: '',
+        masterSnackId: '',
+        name: '',
+        category: 'popcorn',
+        price: '',
+        imageUrl: ''
+    });
+
+    // ==========================================
+    // 3. CÁC HÀM FETCH DỮ LIỆU GIẢ LẬP (MOCK)
+    // ==========================================
+    /*const fetchCinemas = async () => {
+        setCinemas([
+            { id: '1', name: 'CGV Sư Vạn Hạnh', city: 'TP. Hồ Chí Minh' },
+            { id: '2', name: 'SilverScreen Đà Nẵng', city: 'Đà Nẵng' },
+            { id: '3', name: 'Lotte Cinema', city: 'Hà Nội' }
+        ]);
+    };
+
+    const fetchMasterSnacks = async () => {
+        setMasterSnacks([
+            { id: 'snack-1', name: 'Bắp phô mai khổng lồ', price: 65000, category: 'popcorn', imageUrl: 'https://placehold.co/60x60' },
+            { id: 'snack-2', name: 'Pepsi tươi size L', price: 45000, category: 'drink', imageUrl: 'https://placehold.co/60x60' },
+            { id: 'snack-3', name: 'Combo 2 Bắp 1 Nước', price: 120000, category: 'combo', imageUrl: 'https://placehold.co/60x60' }
+        ]);
+    };
+
+    const fetchCinemaSnacks = async () => {
+        setLoading(true);
+        setTimeout(() => {
+            setCinemaSnacks([
+                { snackId: 'snack-1', name: 'Bắp phô mai khổng lồ', price: 70000, isAvailable: true, category: 'popcorn', imageUrl: 'https://placehold.co/60x60', description: 'Bắp rang bơ phô mai thơm lừng' },
+                { snackId: 'snack-2', name: 'Pepsi tươi size L', price: 50000, isAvailable: false, category: 'drink', imageUrl: 'https://placehold.co/60x60', description: 'Giải khát cực đã' }
+            ]);
+            setLoading(false);
+        }, 500);
+    };*/
+    // ==========================================
+    // 3. CÁC HÀM GỌI API THẬT TỪ DATABASE
+    // ==========================================
+    const fetchCinemas = async () => {
+        try {
+            const res = await axiosInstance.get('/api/cinemas');
+            setCinemas(res.data);
+        } catch  {
+            toast.error('Không thể tải danh sách rạp từ hệ thống!');
+        }
+    };
+
+    const fetchMasterSnacks = async () => {
+        try {
+            const res = await axiosInstance.get('/api/snacks'); // Kho tổng master snacks
+            setMasterSnacks(res.data);
+        } catch  {
+            toast.error('Không thể tải dữ liệu kho tổng!');
+        }
+    };
+
+    const fetchCinemaSnacks = async (cinemaId) => {
+        if (!cinemaId) return;
+        setLoading(true);
+        try {
+            const res = await axiosInstance.get(`/api/cinemas/${cinemaId}/snacks`);
+            setCinemaSnacks(res.data);
+        } catch  {
+            toast.error('Không thể tải thực đơn bắp nước của rạp!');
+            setCinemaSnacks([]);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
         fetchCinemas();
@@ -21,231 +107,467 @@ const AdminSnacks = () => {
 
     useEffect(() => {
         if (selectedCinemaId) {
-            fetchCinemaSnacks(selectedCinemaId);
+            fetchCinemaSnacks();
         } else {
             setCinemaSnacks([]);
         }
+        // Reset bộ lọc mỗi khi đổi rạp
+        setFilterCategory('all');
     }, [selectedCinemaId]);
 
-    const fetchCinemas = async () => {
-        try {
-            const res = await fetch(`${API_BASE}/cinemas`);
-            if (res.ok) {
-                const data = await res.json();
-                setCinemas(data);
-                if (data.length > 0) setSelectedCinemaId(data[0].id);
+
+    // ==========================================
+    // 4. CÁC HÀM XỬ LÝ SỰ KIỆN CỦA MODAL
+    // ==========================================
+    const handleOpenConfirmModal = (snack) => {
+        setTargetSnack(snack);
+        setIsConfirmModalOpen(true);
+    };
+
+    const handleConfirmToggle = () => {
+        if (!targetSnack) return;
+        setCinemaSnacks(prev => prev.map(s =>
+            s.snackId === targetSnack.snackId ? { ...s, isAvailable: !targetSnack.isAvailable } : s
+        ));
+        toast.success(targetSnack.isAvailable ? 'Đã ẩn món khỏi thực đơn!' : 'Đã mở bán lại món!');
+        setIsConfirmModalOpen(false);
+    };
+
+    const handleOpenEditModal = (snack) => {
+        setEditingSnack({ ...snack });
+        setIsEditModalOpen(true);
+    };
+
+    const handleSaveUpdate = () => {
+        setCinemaSnacks(prev => prev.map(s =>
+            s.snackId === editingSnack.snackId ? { ...s, ...editingSnack } : s
+        ));
+        toast.success('Cập nhật thông tin món thành công!');
+        setIsEditModalOpen(false);
+    };
+
+    const handleOpenAddModal = () => {
+        setAddFormData({
+            cinemaId: selectedCinemaId || '',
+            masterSnackId: '',
+            name: '',
+            category: 'popcorn',
+            price: '',
+            imageUrl: ''
+        });
+        setAddMode('existing');
+        setIsAddModalOpen(true);
+    };
+
+    const handleConfirmAdd = () => {
+        if (!addFormData.cinemaId) return toast.error('Vui lòng chọn cụm rạp!');
+        if (addMode === 'existing' && !addFormData.masterSnackId) return toast.error('Vui lòng chọn món từ kho!');
+        if (addMode === 'new' && (!addFormData.name || !addFormData.imageUrl)) return toast.error('Vui lòng nhập đủ tên và ảnh!');
+        if (!addFormData.price) return toast.error('Vui lòng nhập giá bán!');
+
+        setIsAdding(true);
+
+        setTimeout(() => {
+            const newSnackMock = {
+                snackId: addMode === 'existing' ? addFormData.masterSnackId : `new-${Date.now()}`,
+                name: addFormData.name,
+                category: addFormData.category,
+                imageUrl: addFormData.imageUrl,
+                price: parseFloat(addFormData.price),
+                isAvailable: true,
+                description: addMode === 'existing' ? 'Đồng bộ từ kho tổng' : 'Tạo mới nội bộ'
+            };
+
+            // Nếu thêm vào rạp đang chọn, đẩy món mới LÊN ĐẦU danh sách
+            if (addFormData.cinemaId === selectedCinemaId) {
+                setCinemaSnacks(prev => [newSnackMock, ...prev]);
             }
-        } catch (error) {
-            console.error('Lỗi khi tải danh sách rạp:', error);
+
+            toast.success('Thêm món vào rạp thành công!');
+            setIsAdding(false);
+            setIsAddModalOpen(false);
+        }, 800);
+    };
+
+    const handleMasterSnackSelect = (masterId) => {
+        const found = masterSnacks.find(s => s.id === masterId);
+        if (found) {
+            setAddFormData(prev => ({
+                ...prev,
+                masterSnackId: masterId,
+                name: found.name,
+                category: found.category,
+                imageUrl: found.imageUrl
+            }));
         }
     };
 
-    const fetchMasterSnacks = async () => {
-        try {
-            const res = await fetch(`${API_BASE}/snacks`);
-            if (res.ok) setMasterSnacks(await res.json());
-        } catch (error) {
-            console.error('Lỗi tải Master Snacks:', error);
-        }
-    };
+    // Áp dụng bộ lọc phân loại trước khi render
+    const filteredSnacks = cinemaSnacks.filter(snack => filterCategory === 'all' || snack.category === filterCategory);
 
-    const fetchCinemaSnacks = async (cinemaId) => {
-        setLoading(true);
-        try {
-            const res = await fetch(`${API_BASE}/cinemas/${cinemaId}/snacks?onlyAvailable=false`);
-            if (res.ok) setCinemaSnacks(await res.json());
-        } catch (error) {
-            console.error('Lỗi tải Cinema Snacks:', error);
-        }
-        setLoading(false);
-    };
 
-    const handleUpdateSnack = async (snackId, currentPrice, currentIsAvailable, field, newValue) => {
-        const updatedPrice = field === 'price' ? parseFloat(newValue) : currentPrice;
-        const updatedStatus = field === 'status' ? newValue : currentIsAvailable;
-
-        try {
-            const res = await fetch(`${API_BASE}/cinemas/${selectedCinemaId}/snacks/${snackId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ price: updatedPrice, isAvailable: updatedStatus })
-            });
-
-            if (res.ok) {
-                setCinemaSnacks(prev => prev.map(s =>
-                    s.snackId === snackId ? { ...s, price: updatedPrice, isAvailable: updatedStatus } : s
-                ));
-            } else {
-                alert("Cập nhật thất bại!");
-            }
-        } catch (error) {
-            console.error('Lỗi cập nhật:', error);
-        }
-    };
-
-    const handleAddSnackToCinema = async () => {
-        if (!newSnackId || !newSnackPrice) return alert('Vui lòng chọn món và nhập giá!');
-
-        try {
-            const res = await fetch(`${API_BASE}/cinemas/${selectedCinemaId}/snacks`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ snackId: newSnackId, price: parseFloat(newSnackPrice) })
-            });
-
-            if (res.ok) {
-                fetchCinemaSnacks(selectedCinemaId);
-                setNewSnackId('');
-                setNewSnackPrice('');
-            } else {
-                const error = await res.json();
-                alert(error.message || "Thêm món thất bại!");
-            }
-        } catch (error) {
-            console.error('Lỗi thêm món:', error);
-        }
-    };
-
-    const handleRemoveSnack = async (snackId) => {
-        if (!window.confirm("Bạn có chắc muốn gỡ món này khỏi thực đơn của rạp?")) return;
-
-        try {
-            const res = await fetch(`${API_BASE}/cinemas/${selectedCinemaId}/snacks/${snackId}`, {
-                method: 'DELETE'
-            });
-
-            if (res.ok) {
-                setCinemaSnacks(prev => prev.filter(s => s.snackId !== snackId));
-            }
-        } catch (error) {
-            console.error('Lỗi xóa món:', error);
-        }
-    };
-
+    // ==========================================
+    // 5. GIAO DIỆN (JSX)
+    // ==========================================
     return (
-        <div className="min-h-screen bg-slate-900 text-white p-8">
-            <div className="max-w-5xl mx-auto">
-                <h1 className="text-3xl font-bold mb-2 text-red-500">Quản Lý Menu Bắp Nước Theo Rạp</h1>
-                <p className="text-slate-400 mb-8">Cấu hình danh mục và giá bắp nước riêng biệt tại từng rạp.</p>
+        <div className="p-6 bg-[#0f0f16] min-h-screen text-gray-200">
+            <Toaster position="top-right" reverseOrder={false} />
 
-                <div className="bg-slate-800 p-6 rounded-lg mb-8 shadow-lg flex items-end gap-4">
-                    <div className="flex-1">
-                        <label className="block text-sm font-medium mb-2 text-slate-300">Chọn Cụm Rạp:</label>
-                        <select
-                            className="w-full bg-slate-700 border border-slate-600 text-white rounded px-4 py-2 focus:outline-none focus:border-red-500"
-                            value={selectedCinemaId}
-                            onChange={(e) => setSelectedCinemaId(e.target.value)}
-                        >
-                            <option value="" disabled>-- Vui lòng chọn rạp --</option>
-                            {cinemas.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                        </select>
-                    </div>
+            <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-white mb-2">Menu Bắp Nước Theo Rạp</h1>
+                    <p className="text-sm text-gray-400">Cấu hình danh mục, giá bán và trạng thái món ăn cho từng cụm rạp.</p>
                 </div>
+                <button
+                    onClick={handleOpenAddModal}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-5 rounded-lg shadow-lg transition-colors"
+                >
+                    <Plus size={20} />
+                    Thêm món mới
+                </button>
+            </div>
 
-                {selectedCinemaId && (
-                    <div className="bg-slate-800 rounded-lg shadow-lg overflow-hidden mb-8">
-                        <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
-                            <h2 className="text-xl font-semibold text-white">Thực Đơn Của Rạp</h2>
-                        </div>
+            {/* BỘ LỌC */}
+            <div className="bg-[#151521] border border-gray-800 rounded-xl p-6 mb-8 flex gap-6">
+                <div className="flex-1">
+                    <label className="block text-xs font-semibold text-gray-400 uppercase mb-2">1. Xem thực đơn của rạp</label>
+                    <select
+                        className="w-full bg-[#1e1e2d] border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                        value={selectedCinemaId}
+                        onChange={(e) => setSelectedCinemaId(e.target.value)}
+                    >
+                        <option value="">-- Vui lòng chọn rạp để xem --</option>
+                        {cinemas.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="flex-1">
+                    <label className="block text-xs font-semibold text-gray-400 uppercase mb-2">Phân loại món</label>
+                    {/* Select box đã được gán state filterCategory */}
+                    <select
+                        className="w-full bg-[#1e1e2d] border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                        value={filterCategory}
+                        onChange={(e) => setFilterCategory(e.target.value)}
+                    >
+                        <option value="all">Tất cả món</option>
+                        <option value="popcorn">Đồ ăn nhẹ</option>
+                        <option value="drink">Nước giải khát</option>
+                        <option value="combo">Combo</option>
+                    </select>
+                </div>
+            </div>
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-900/50 text-slate-300 text-sm">
-                                        <th className="p-4 font-medium">Hình ảnh</th>
-                                        <th className="p-4 font-medium">Tên món</th>
-                                        <th className="p-4 font-medium">Giá bán tại rạp (VNĐ)</th>
-                                        <th className="p-4 font-medium text-center">Trạng thái</th>
-                                        <th className="p-4 font-medium text-center">Hành động</th>
+            {/* BẢNG DANH SÁCH MÓN ĂN */}
+            {selectedCinemaId && (
+                <div className="bg-[#151521] border border-gray-800 rounded-xl overflow-hidden mb-8">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="bg-[#1e1e2d] border-b border-gray-800">
+                                <th className="px-6 py-4 text-sm font-semibold text-gray-300">Hình ảnh</th>
+                                <th className="px-6 py-4 text-sm font-semibold text-gray-300">Tên món & Mô tả</th>
+                                <th className="px-6 py-4 text-sm font-semibold text-gray-300">Phân loại</th>
+                                <th className="px-6 py-4 text-sm font-semibold text-gray-300">Giá bán (VNĐ)</th>
+                                <th className="px-6 py-4 text-sm font-semibold text-gray-300 text-center">Trạng thái</th>
+                                <th className="px-6 py-4 text-sm font-semibold text-gray-300 text-center">Thao tác</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr><td colSpan="6" className="text-center py-8 text-gray-400">Đang tải dữ liệu...</td></tr>
+                            ) : filteredSnacks.length === 0 ? (
+                                <tr><td colSpan="6" className="text-center py-8 text-gray-400">Không tìm thấy món nào phù hợp với bộ lọc.</td></tr>
+                            ) : (
+                                filteredSnacks.map((snack) => (
+                                    <tr key={snack.snackId} className="border-b border-gray-800 hover:bg-[#1e1e2d]/50 transition-colors">
+                                        <td className="px-6 py-4">
+                                            <img src={snack.imageUrl} alt={snack.name} className="w-12 h-12 rounded object-cover" />
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <p className="font-semibold text-white">{snack.name}</p>
+                                            <p className="text-xs text-gray-500 mt-1">{snack.description}</p>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className="px-3 py-1 bg-gray-800 text-gray-300 text-xs rounded-full border border-gray-700">
+                                                {snack.category === 'popcorn' ? 'Đồ ăn nhẹ' : snack.category === 'drink' ? 'Nước giải khát' : 'Combo'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 font-semibold text-[#00ff88]">
+                                            {snack.price.toLocaleString('vi-VN')} đ
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border ${snack.isAvailable ? 'bg-[#00ff88]/10 text-[#00ff88] border-[#00ff88]/20' : 'bg-gray-800 text-gray-400 border-gray-700'}`}>
+                                                <span className={`w-1.5 h-1.5 rounded-full ${snack.isAvailable ? 'bg-[#00ff88]' : 'bg-gray-500'}`}></span>
+                                                {snack.isAvailable ? 'Đang kinh doanh' : 'Tạm ngừng bán'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <div className="flex items-center justify-center gap-3">
+                                                <button
+                                                    onClick={() => handleOpenConfirmModal(snack)}
+                                                    className={`${snack.isAvailable ? 'text-orange-400 hover:text-orange-300' : 'text-green-400 hover:text-green-300'} transition-colors`}
+                                                    title={snack.isAvailable ? 'Ẩn món này' : 'Mở bán lại'}
+                                                >
+                                                    {snack.isAvailable ? <EyeOff size={18} /> : <Eye size={18} />}
+                                                </button>
+                                                <button onClick={() => handleOpenEditModal(snack)} className="text-blue-400 hover:text-blue-300 transition-colors" title="Sửa thông tin">
+                                                    <Pencil size={18} />
+                                                </button>
+                                            </div>
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-700">
-                                    {loading && (
-                                        <tr><td colSpan="5" className="p-8 text-center text-slate-400">Đang tải dữ liệu...</td></tr>
-                                    )}
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
 
-                                    {!loading && cinemaSnacks.length === 0 && (
-                                        <tr><td colSpan="5" className="p-8 text-center text-slate-400">Rạp này chưa có món nào trong thực đơn.</td></tr>
-                                    )}
+            {/* MODAL 1: THÊM MÓN MỚI */}
+            {isAddModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-10">
+                    <div className="bg-[#1e1e2d] w-full max-w-xl rounded-xl shadow-2xl p-6 text-gray-200 border border-gray-700 relative m-auto">
+                        <h2 className="text-xl font-bold text-white mb-6">Thêm món vào thực đơn rạp</h2>
 
-                                    {!loading && cinemaSnacks.length > 0 && cinemaSnacks.map(snack => (
-                                        <tr key={snack.snackId} className="hover:bg-slate-700/50 transition-colors">
-                                            <td className="p-4">
-                                                <img src={snack.imageUrl || 'https://via.placeholder.com/50'} alt={snack.name} className="w-12 h-12 rounded object-cover" />
-                                            </td>
-                                            <td className="p-4 font-medium">{snack.name}</td>
-                                            <td className="p-4">
-                                                <input
-                                                    type="number"
-                                                    className="bg-slate-900 border border-slate-600 rounded px-3 py-1 w-32 focus:outline-none focus:border-red-500"
-                                                    defaultValue={snack.price}
-                                                    onBlur={(e) => handleUpdateSnack(snack.snackId, snack.price, snack.isAvailable, 'price', e.target.value)}
-                                                />
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                <button
-                                                    onClick={() => handleUpdateSnack(snack.snackId, snack.price, snack.isAvailable, 'status', !snack.isAvailable)}
-                                                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${snack.isAvailable ? 'bg-green-500/20 text-green-400 border border-green-500/50' : 'bg-red-500/20 text-red-400 border border-red-500/50'}`}
-                                                >
-                                                    {snack.isAvailable ? 'Còn hàng' : 'Tạm hết'}
-                                                </button>
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                <button
-                                                    onClick={() => handleRemoveSnack(snack.snackId)}
-                                                    className="text-slate-400 hover:text-red-400 transition-colors"
-                                                    title="Gỡ khỏi rạp"
-                                                >
-                                                    🗑️ Xóa
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {selectedCinemaId && (
-                    <div className="bg-slate-800 p-6 rounded-lg shadow-lg border border-slate-700">
-                        <h3 className="text-lg font-semibold text-white mb-4">Thêm Món Mới Vào Rạp</h3>
-                        <div className="flex gap-4 items-end">
-                            <div className="flex-1">
-                                <label className="block text-sm font-medium mb-2 text-slate-300">Chọn món từ danh mục tổng:</label>
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Chọn Rạp áp dụng</label>
                                 <select
-                                    className="w-full bg-slate-900 border border-slate-600 text-white rounded px-4 py-2 focus:outline-none focus:border-red-500"
-                                    value={newSnackId}
-                                    onChange={(e) => setNewSnackId(e.target.value)}
+                                    value={addFormData.cinemaId}
+                                    onChange={(e) => setAddFormData({ ...addFormData, cinemaId: e.target.value })}
+                                    className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
                                 >
-                                    <option value="">-- Chọn bắp nước --</option>
-                                    {masterSnacks.filter(ms => !cinemaSnacks.some(cs => cs.snackId === ms.id)).map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
+                                    <option value="">-- Chọn rạp --</option>
+                                    {cinemas.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium mb-2 text-slate-300">Giá bán (VNĐ):</label>
-                                <input
-                                    type="number"
-                                    className="w-40 bg-slate-900 border border-slate-600 rounded px-4 py-2 focus:outline-none focus:border-red-500"
-                                    placeholder="Ví dụ: 65000"
-                                    value={newSnackPrice}
-                                    onChange={(e) => setNewSnackPrice(e.target.value)}
-                                />
+
+                            <div className="flex gap-4 p-1 bg-[#151521] rounded-lg border border-gray-700">
+                                <button
+                                    onClick={() => setAddMode('existing')}
+                                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${addMode === 'existing' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    Chọn từ kho tổng
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setAddMode('new');
+                                        setAddFormData(prev => ({ ...prev, masterSnackId: '', name: '', imageUrl: '' }));
+                                    }}
+                                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${addMode === 'new' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    Tạo món mới nội bộ
+                                </button>
                             </div>
+
+                            {addMode === 'existing' ? (
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Chọn món có sẵn</label>
+                                    <select
+                                        value={addFormData.masterSnackId}
+                                        onChange={(e) => handleMasterSnackSelect(e.target.value)}
+                                        className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                    >
+                                        <option value="">-- Chọn món từ Master Snacks --</option>
+                                        {masterSnacks.map(s => <option key={s.id} value={s.id}>{s.name} (Kho: {s.price.toLocaleString()}đ)</option>)}
+                                    </select>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Tên món mới</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Nhập tên món..."
+                                        value={addFormData.name}
+                                        onChange={(e) => setAddFormData({ ...addFormData, name: e.target.value })}
+                                        className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                </div>
+                            )}
+
+                            <div className="flex gap-4">
+                                <div className="flex-1">
+                                    <label className="block text-sm text-gray-400 mb-1">Phân loại</label>
+                                    <select
+                                        value={addFormData.category}
+                                        onChange={(e) => setAddFormData({ ...addFormData, category: e.target.value })}
+                                        disabled={addMode === 'existing'}
+                                        className={`w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 ${addMode === 'existing' ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                    >
+                                        <option value="popcorn">Đồ ăn nhẹ</option>
+                                        <option value="drink">Nước giải khát</option>
+                                        <option value="combo">Combo</option>
+                                    </select>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-sm text-gray-400 mb-1">Giá bán tại rạp (VNĐ)</label>
+                                    <input
+                                        type="number"
+                                        placeholder="Ví dụ: 65000"
+                                        value={addFormData.price}
+                                        onChange={(e) => setAddFormData({ ...addFormData, price: e.target.value })}
+                                        className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Link ảnh đại diện</label>
+                                <input
+                                    type="text"
+                                    placeholder="Dán URL ảnh..."
+                                    value={addFormData.imageUrl}
+                                    onChange={(e) => setAddFormData({ ...addFormData, imageUrl: e.target.value })}
+                                    disabled={addMode === 'existing'}
+                                    className={`w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 mb-3 text-white focus:outline-none focus:border-blue-500 ${addMode === 'existing' ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                />
+                                <div className="w-full h-32 bg-[#151521] border-2 border-dashed border-gray-600 rounded-lg flex items-center justify-center overflow-hidden">
+                                    {addFormData.imageUrl ? (
+                                        <img src={addFormData.imageUrl} alt="Preview" className="h-full object-cover" />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm">Chưa có ảnh (Xem trước)</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-8">
                             <button
-                                onClick={handleAddSnackToCinema}
-                                className="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-6 rounded transition-colors"
+                                onClick={() => setIsAddModalOpen(false)}
+                                disabled={isAdding}
+                                className="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-700 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                + Thêm Vào Rạp
+                                Hủy bỏ
+                            </button>
+                            <button
+                                onClick={handleConfirmAdd}
+                                disabled={isAdding}
+                                className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-lg transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                            >
+                                {isAdding ? <><Loader2 size={16} className="animate-spin" /> Đang lưu...</> : 'Xác nhận thêm vào rạp'}
                             </button>
                         </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
+
+            {/* Modal Cập Nhật */}
+            {isEditModalOpen && editingSnack && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-[#1e1e2d] w-full max-w-lg rounded-xl shadow-2xl p-6 text-gray-200 border border-gray-700 relative">
+                        <h2 className="text-xl font-bold text-white mb-6">Chỉnh sửa thông tin món</h2>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Tên món & Mô tả</label>
+                                <input
+                                    type="text"
+                                    value={editingSnack.name || ''}
+                                    onChange={(e) => setEditingSnack({ ...editingSnack, name: e.target.value })}
+                                    className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                />
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="flex-1">
+                                    <label className="block text-sm text-gray-400 mb-1">Phân loại</label>
+                                    <select
+                                        value={editingSnack.category || 'popcorn'}
+                                        onChange={(e) => setEditingSnack({ ...editingSnack, category: e.target.value })}
+                                        className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                    >
+                                        <option value="popcorn">Đồ ăn nhẹ</option>
+                                        <option value="drink">Nước giải khát</option>
+                                        <option value="combo">Combo</option>
+                                    </select>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-sm text-gray-400 mb-1">Trạng thái</label>
+                                    <select
+                                        value={editingSnack.isAvailable ? 'true' : 'false'}
+                                        onChange={(e) => setEditingSnack({ ...editingSnack, isAvailable: e.target.value === 'true' })}
+                                        className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                    >
+                                        <option value="true">Đang kinh doanh</option>
+                                        <option value="false">Tạm ngừng bán</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Giá bán áp dụng tại rạp (VNĐ)</label>
+                                <input
+                                    type="number"
+                                    value={editingSnack.price || 0}
+                                    onChange={(e) => setEditingSnack({ ...editingSnack, price: Number(e.target.value) })}
+                                    className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Link ảnh đại diện</label>
+                                <input
+                                    type="text"
+                                    value={editingSnack.imageUrl || ''}
+                                    onChange={(e) => setEditingSnack({ ...editingSnack, imageUrl: e.target.value })}
+                                    className="w-full bg-[#151521] border border-gray-600 rounded-lg px-4 py-2.5 mb-3 text-white focus:outline-none focus:border-blue-500"
+                                />
+                                <div className="w-full h-32 bg-[#151521] border-2 border-dashed border-gray-600 rounded-lg flex items-center justify-center overflow-hidden">
+                                    {editingSnack.imageUrl ? (
+                                        <img src={editingSnack.imageUrl} alt="Preview" className="h-full object-cover" />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm">Chưa có ảnh</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 mt-8">
+                            <button
+                                onClick={() => setIsEditModalOpen(false)}
+                                className="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-700 cursor-pointer transition-colors"
+                            >
+                                Hủy bỏ
+                            </button>
+                            <button
+                                onClick={handleSaveUpdate}
+                                className="px-5 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-lg transition-colors"
+                            >
+                                Lưu thay đổi
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Xác nhận Ẩn/Mở */}
+            {isConfirmModalOpen && targetSnack && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-[#1e1e2d] w-full max-w-md rounded-xl shadow-2xl p-6 text-gray-200 border border-gray-700 relative">
+                        <h2 className="text-xl font-bold text-white mb-4">
+                            {targetSnack.isAvailable ? 'Xác nhận ẩn món' : 'Mở lại kinh doanh'}
+                        </h2>
+                        <p className="text-gray-300 mb-6 text-sm leading-relaxed">
+                            Bạn có chắc chắn muốn {targetSnack.isAvailable ? 'ẩn' : 'mở bán lại'} món <strong className="text-white">{targetSnack.name}</strong> khỏi thực đơn rạp <strong className="text-white">{cinemas.find(c => c.id === selectedCinemaId)?.name || 'này'}</strong>?
+                            {targetSnack.isAvailable && (
+                                <span className="block mt-2 text-orange-400">
+                                    * Món này sẽ hoàn toàn không được hiển thị lên giao diện chọn bắp nước của khách hàng khi mua vé.
+                                </span>
+                            )}
+                        </p>
+                        <div className="flex justify-end gap-3 mt-4">
+                            <button
+                                onClick={() => setIsConfirmModalOpen(false)}
+                                className="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-700 cursor-pointer transition-colors"
+                            >
+                                Hủy bỏ
+                            </button>
+                            <button
+                                onClick={handleConfirmToggle}
+                                className={`px-5 py-2.5 rounded-lg text-sm font-medium text-white cursor-pointer shadow-lg transition-colors ${targetSnack.isAvailable ? 'bg-orange-600 hover:bg-orange-500' : 'bg-green-600 hover:bg-green-500'
+                                    }`}
+                            >
+                                Đồng ý
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

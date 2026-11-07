@@ -18,6 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 LoadDotEnv(builder);
 
 // 1. Add Controllers & Swagger with JWT Bearer
+builder.Services.AddScoped<ISnackRepository, SnackRepository>();
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 builder.Services.AddHttpClient();
@@ -111,7 +112,7 @@ else
 const string InternalScheme = "InternalJwt";
 const string ClerkScheme = "ClerkJwt";
 
-var jwtSecret = builder.Configuration["JWT_SECRET"] 
+var jwtSecret = builder.Configuration["Jwt:Key"] 
     ?? Environment.GetEnvironmentVariable("JWT_SECRET");
 
 if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
@@ -191,8 +192,7 @@ var avatarStoragePath = Path.Combine(
     "avatars");
 Directory.CreateDirectory(avatarStoragePath);
 
-if (app.Environment.IsDevelopment())
-{
+if (app.Environment.IsDevelopment()){
     app.UseSwagger();
     app.UseSwaggerUI();
 }
