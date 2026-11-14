@@ -54,6 +54,19 @@ const useMovies = {
         return axiosInstance.get('/genres');
     },
 
+    async createGenre(data) {
+        return axiosInstance.post('/genres', data);
+    },
+
+    async updateGenre(id, data) {
+        if (!id) throw new Error('ID thể loại không được để trống');
+        return axiosInstance.put(`/genres/${encodeURIComponent(id)}`, data);
+    },
+
+    async deleteGenre(id) {
+        if (!id) throw new Error('ID thể loại không được để trống');
+        return axiosInstance.delete(`/genres/${encodeURIComponent(id)}`);
+    },
     async createMovie(data) {
         return axiosInstance.post('/movies', data);
     },
@@ -89,4 +102,3 @@ const useMovies = {
 
 export { useMovies };
 export default useMovies;
-

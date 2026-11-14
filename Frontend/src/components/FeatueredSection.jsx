@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BlurCircle from './BlurCircle';
@@ -12,6 +13,7 @@ const FeatueredSection = () => {
     const [movies, setMovies] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [refreshKey, setRefreshKey] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
@@ -53,8 +55,52 @@ const FeatueredSection = () => {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [refreshKey]);
 
+    // T? l?m m?i khi qu?n tr? vi?n th?m, s?a ho?c x?a phim.
+    useEffect(() => {
+        let disposed = false;
+        let connection = null;
+
+        const connect = async () => {
+            const apiBaseUrl = (
+                import.meta.env.VITE_API_BASE_URL ||
+                'http://localhost:5000/api'
+            ).replace(/\/+$/, '');
+
+            const hubUrl =
+                apiBaseUrl.replace(/\/api$/i, '') + '/hubs/movies';
+
+            const newConnection = new HubConnectionBuilder()
+                .withUrl(hubUrl)
+                .withAutomaticReconnect()
+                .configureLogging(LogLevel.Warning)
+                .build();
+
+            connection = newConnection;
+            const refresh = () => {
+                if (!disposed) setRefreshKey((value) => value + 1);
+            };
+
+            newConnection.on('MovieCreated', refresh);
+            newConnection.on('MovieUpdated', refresh);
+            newConnection.on('MovieDeleted', refresh);
+            newConnection.onreconnected(refresh);
+
+            try {
+                await newConnection.start();
+                if (disposed) await newConnection.stop();
+            } catch (error) {
+                if (!disposed) console.warn('SignalR phim n?i b?t', error);
+            }
+        };
+
+        void connect();
+        return () => {
+            disposed = true;
+            if (connection) void connection.stop().catch(() => {});
+        };
+    }, []);
     const scroll = (direction) => {
         if (!scrollRef.current) return;
 

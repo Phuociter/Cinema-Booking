@@ -132,7 +132,9 @@ const App = () => {
       <Toaster />
       <Routes>
         {/* Admin Portal Routes (Bảo vệ bởi AdminRoute) */}
-        <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+    {/* <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>*/}
+    
+         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="movies" element={<AdminMovies />} />

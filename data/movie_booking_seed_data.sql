@@ -82,8 +82,17 @@ SELECT
     'Bộ phim số ' || n || ' mang đến một câu chuyện đầy kịch tính và cảm xúc, hứa hẹn chinh phục khán giả yêu điện ảnh.',
     (85 + (n % 60)),
     (ARRAY['P','K','T13','T16','T18','C'])[(n % 6) + 1],
-    'https://picsum.photos/seed/movie-poster-' || n || '/400/600',
-    'https://picsum.photos/seed/movie-backdrop-' || n || '/1280/720',
+    (ARRAY[
+        'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&fit=crop',
+        'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&fit=crop',
+        'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=400&fit=crop',
+        'https://images.unsplash.com/photo-1574267432553-4b4628081c31?w=400&fit=crop',
+        'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=400&fit=crop',
+        'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&fit=crop',
+        'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=400&fit=crop',
+        'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=400&fit=crop'
+    ])[(n % 8) + 1],
+    'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1280&fit=crop',
     NULL, -- trailer_url left NULL on purpose: no real/working trailer link exists for a fictional seed movie
     (DATE '2025-01-01' + ((n * 3) || ' days')::interval)::date,
     (round((5 + (n % 50) * 0.1)::numeric, 1)),
@@ -139,7 +148,7 @@ SELECT
     'Số ' || n || ' đường Điện Ảnh, Quận ' || ((n % 12) + 1),
     (ARRAY['Hà Nội','TP. Hồ Chí Minh','Đà Nẵng','Hải Phòng','Cần Thơ','Nha Trang','Huế','Vũng Tàu','Biên Hòa','Quy Nhơn'])[(n % 10) + 1],
     '1900' || lpad((1000 + n)::text, 4, '0'),
-    'https://picsum.photos/seed/cinema-' || n || '/800/500'
+    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800&fit=crop'
 FROM generate_series(1, 100) AS n;
 
 WITH cinema_n AS (
