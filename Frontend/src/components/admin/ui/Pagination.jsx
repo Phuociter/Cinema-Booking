@@ -13,8 +13,10 @@ export const Pagination = ({
   onPageChange,
   onPageSizeChange,
   disabled = false,
+  pageSizeOptions = PAGE_SIZE_OPTIONS,
 }) => {
-  const safePageSize = PAGE_SIZE_OPTIONS.includes(pageSize) ? pageSize : 50;
+  const defaultPageSize = pageSizeOptions[0] ?? 50;
+  const safePageSize = pageSizeOptions.includes(pageSize) ? pageSize : defaultPageSize;
   const totalPages = total != null ? Math.max(1, Math.ceil(total / safePageSize)) : null;
 
   const canPrev = page > 1;
@@ -128,12 +130,12 @@ export const Pagination = ({
           value={safePageSize}
           onChange={(e) => {
             const val = Number(e.target.value);
-            onPageSizeChange(PAGE_SIZE_OPTIONS.includes(val) ? val : 50);
+            onPageSizeChange(pageSizeOptions.includes(val) ? val : defaultPageSize);
           }}
           disabled={disabled}
           className="rounded-md border border-zinc-800 bg-zinc-900 text-zinc-200 px-2 py-1 outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
-          {PAGE_SIZE_OPTIONS.map((size) => (
+          {pageSizeOptions.map((size) => (
             <option key={size} value={size}>
               {size}
             </option>

@@ -16,6 +16,7 @@ export const useShowtimeList = (viewMode) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [filterState, setFilterState] = useState({
+    city: '',
     cinemaId: '',
     auditoriumId: '',
     movieId: '',

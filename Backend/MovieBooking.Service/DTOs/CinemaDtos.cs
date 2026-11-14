@@ -10,6 +10,7 @@ public class CinemaDto
     public string? City { get; set; }
     public string? Hotline { get; set; }
     public string? ImageUrl { get; set; }
+    public int ActiveMovieCountThisMonth { get; set; }
     public List<AuditoriumDto> Auditoriums { get; set; } = new();
 }
 
@@ -21,28 +22,33 @@ public class AuditoriumDto
     public string HallType { get; set; } = "2D";
     public int? TotalRows { get; set; }
     public int? TotalColumns { get; set; }
+    public int ActiveMovieCountThisMonth { get; set; }
 }
 
-// ---- Admin: CRUD cụm rạp ----
+// ---- Admin: CRUD cụm rạp & phòng chiếu ----
 
-public class CreateCinemaRequest
+public class CinemaUpsertRequest
 {
-    [Required, StringLength(150, MinimumLength = 1)]
     public string Name { get; set; } = string.Empty;
-
-    [StringLength(255)]
-    public string? Address { get; set; }
-
-    [StringLength(100)]
     public string? City { get; set; }
-
-    [StringLength(20)]
+    public string? Address { get; set; }
     public string? Hotline { get; set; }
-
     public string? ImageUrl { get; set; }
 }
 
-public class UpdateCinemaRequest : CreateCinemaRequest
+public class AuditoriumUpsertRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string HallType { get; set; } = "2D";
+    public int TotalRows { get; set; }
+    public int TotalColumns { get; set; }
+}
+
+public class CreateCinemaRequest : CinemaUpsertRequest
+{
+}
+
+public class UpdateCinemaRequest : CinemaUpsertRequest
 {
 }
 

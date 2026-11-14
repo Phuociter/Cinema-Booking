@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Star, Clock, Film, Loader2, ArrowRight, Tag } from 'lucide-react';
+import { Search, X, Clock, Film, Loader2, ArrowRight, Tag } from 'lucide-react';
 import axiosInstance from '../api/axiosInstance';
+import { resolvePoster, handleImageError } from '../utils/imageHelper';
 
 const POPULAR_TAGS = ['Hành Động', 'Kinh Dị', 'Hài', 'Viễn Tưởng', 'Chính Kịch', 'Hoạt Hình'];
 
@@ -166,7 +167,7 @@ const SearchModal = ({ isOpen, onClose }) => {
               </div>
 
               {results.map((movie) => {
-                const poster = movie.posterUrl || movie.backdropUrl || 'https://picsum.photos/seed/movie/200/300';
+                const poster = resolvePoster(movie.posterUrl || movie.backdropUrl, movie.id || movie.title);
                 return (
                   <div
                     key={movie.id}
@@ -177,10 +178,7 @@ const SearchModal = ({ isOpen, onClose }) => {
                       src={poster}
                       alt={movie.title}
                       className="w-12 h-16 object-cover rounded-xl shrink-0 shadow-md border border-white/10"
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = 'https://picsum.photos/seed/movie/200/300';
-                      }}
+                      onError={(e) => handleImageError(e, movie.id || movie.title)}
                     />
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-semibold text-white group-hover:text-red-400 transition-colors truncate">
@@ -201,12 +199,7 @@ const SearchModal = ({ isOpen, onClose }) => {
                             {movie.durationMin}p
                           </span>
                         )}
-                        {movie.ratingScore > 0 && (
-                          <span className="flex items-center gap-1 text-amber-400 font-semibold shrink-0">
-                            <Star className="w-3 h-3 fill-amber-400" />
-                            {movie.ratingScore}
-                          </span>
-                        )}
+
                       </div>
                     </div>
                     <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0 mr-1" />

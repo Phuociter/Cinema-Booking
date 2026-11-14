@@ -11,14 +11,16 @@ using MovieBooking.Data.Repositories.Interfaces;
 using MovieBooking.Service.Interfaces;
 using MovieBooking.Service.Mappings;
 using MovieBooking.Service.Services;
-
+using MovieBooking.API.Hubs;
 var builder = WebApplication.CreateBuilder(args);
 
 // Tự động nạp biến môi trường từ file .env nếu có
 LoadDotEnv(builder);
 
 // 1. Add Controllers & Swagger with JWT Bearer
+builder.Services.AddScoped<ISnackRepository, SnackRepository>();
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -54,7 +56,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
     ?? "Host=localhost;Port=5432;Database=cinema_db;Username=postgres;Password=postgres";
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connectionString).UseSnakeCaseNamingConvention());
+options.UseNpgsql(connectionString));
 
 // 3. Register AutoMapper
 builder.Services.AddAutoMapper(cfg => cfg.AddProfile<MappingProfile>());
@@ -63,6 +65,13 @@ builder.Services.AddAutoMapper(cfg => cfg.AddProfile<MappingProfile>());
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IShowtimeRepository, ShowtimeRepository>();
 builder.Services.AddScoped<IShowtimeSeatRepository, ShowtimeSeatRepository>();
+builder.Services.AddScoped<IBookingRepository, BookingRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IReportRepository, ReportRepository>();
+builder.Services.AddScoped<IMovieRepository, MovieRepository>();
+builder.Services.AddScoped<IGenreRepository, GenreRepository>();
+builder.Services.AddScoped<IActorRepository, ActorRepository>();
+builder.Services.AddScoped<ICinemaRepository, CinemaRepository>();
 
 // 5. Register Redis Cache (Singleton)
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
@@ -76,10 +85,17 @@ builder.Services.AddSingleton<IRedisService, RedisService>();
 
 // 6. Register Application Services
 builder.Services.AddScoped<IMovieService, MovieService>();
+builder.Services.AddScoped<IActorService, ActorService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
+builder.Services.AddScoped<IShowtimeSeatService, ShowtimeSeatService>();
 builder.Services.AddScoped<ISnackService, SnackService>();
 builder.Services.AddScoped<ICinemaService, CinemaService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+builder.Services.AddScoped<IAvatarStorage, AvatarStorage>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddHttpClient<IAuthService, AuthService>();
+builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IAdminBookingService, AdminBookingService>();
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddScoped<SmtpEmailSender>();
@@ -101,7 +117,7 @@ else
 const string InternalScheme = "InternalJwt";
 const string ClerkScheme = "ClerkJwt";
 
-var jwtSecret = builder.Configuration["JWT_SECRET"] 
+var jwtSecret = builder.Configuration["Jwt:Key"] 
     ?? Environment.GetEnvironmentVariable("JWT_SECRET");
 
 if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
@@ -166,8 +182,13 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
-
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
 
 // Configure HTTP request pipeline
 var avatarStoragePath = Path.Combine(
@@ -177,8 +198,7 @@ var avatarStoragePath = Path.Combine(
     "avatars");
 Directory.CreateDirectory(avatarStoragePath);
 
-if (app.Environment.IsDevelopment())
-{
+if (app.Environment.IsDevelopment()){
     app.UseSwagger();
     app.UseSwaggerUI();
 }
@@ -195,7 +215,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
+app.MapHub<MovieHub>("/hubs/movies");
 app.Run();
 
 static string[] ResolveAllowedOrigins(IConfiguration configuration)

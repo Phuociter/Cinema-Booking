@@ -16,6 +16,12 @@ public interface IUserProfileService
         string avatarUrl,
         CancellationToken cancellationToken);
 
+    Task<AvatarUploadResult> UploadAvatarAsync(
+        Guid userId,
+        Stream fileStream,
+        long fileSize,
+        CancellationToken cancellationToken);
+
     Task<ChangePasswordResult> ChangePasswordAsync(
         Guid userId,
         ChangePasswordRequest request,
@@ -45,3 +51,13 @@ public enum ResetPasswordResult
     Success,
     InvalidToken
 }
+
+public enum AvatarUploadStatus
+{
+    Success,
+    FileTooLarge,
+    InvalidImage,
+    UserNotFound
+}
+
+public sealed record AvatarUploadResult(AvatarUploadStatus Status, UserDto? User = null);

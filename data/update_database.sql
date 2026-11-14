@@ -6,6 +6,7 @@
 --   3. Cập nhật đa dạng loại phòng chiếu (2D, 3D, IMAX, GOLDCLASS)
 --   4. Sinh 36,000 suất chiếu đa dạng phủ trọn 30 ngày (nhiều khung giờ sáng/trưa/chiều/tối/đêm)
 --   5. Khởi tạo toàn bộ ghế suất chiếu kèm trạng thái thực tế
+--   6. Bổ sung thời hạn hết hạn cho đơn đặt vé
 -- Cách chạy an toàn (tránh lỗi font trên terminal Windows):
 --   Cách 1 (khuyến nghị cho mọi OS):
 --     docker cp data/update_database.sql cinema-postgres:/tmp/update_database.sql
@@ -23,7 +24,14 @@ BEGIN;
 SET client_encoding = 'UTF8';
 
 -- ============================================================
--- PHẦN 0: CẬP NHẬT CẤU TRÚC BẢNG USERS (HỖ TRỢ HYBRID AUTH / CLERK SSO)
+-- PHẦN 0: BỔ SUNG THỜI HẠN CHO ĐƠN ĐẶT VÉ
+-- ============================================================
+
+ALTER TABLE bookings
+ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
+
+-- ============================================================
+-- PHẦN 0.1: CẬP NHẬT CẤU TRÚC BẢNG USERS (HỖ TRỢ HYBRID AUTH / CLERK SSO)
 -- ============================================================
 
 -- 1. Cho phép password_hash NULL (user đăng ký qua Clerk sẽ không có password)
@@ -54,8 +62,10 @@ BEGIN
 END $$;
 
 -- 4. Đảm bảo đủ các Roles hệ thống (Customer, Staff, Admin)
-INSERT INTO Roles (name)
-VALUES ('Customer'), ('Staff'), ('Admin')
+INSERT INTO Roles (id, name)
+VALUES (gen_random_uuid(), 'Customer'), 
+       (gen_random_uuid(), 'Staff'), 
+       (gen_random_uuid(), 'Admin')
 ON CONFLICT (name) DO NOTHING;
 
 -- 5. Đảm bảo tài khoản Admin mẫu luôn tồn tại (admin@example.com / pass: admin)
@@ -95,7 +105,7 @@ WHERE u.email = 'staff@example.com' AND r.name = 'Staff'
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
--- PHẦN 0.1: CẬP NHẬT RÀNG BUỘC SUẤT CHIẾU & ĐỒNG BỘ TRẠNG THÁI GHẾ ĐÃ BÁN
+-- PHẦN 0.2: CẬP NHẬT RÀNG BUỘC SUẤT CHIẾU & ĐỒNG BỘ TRẠNG THÁI GHẾ ĐÃ BÁN
 -- ============================================================
 
 -- 1. Nâng cấp ràng buộc chống trùng lịch chiếu (loại trừ các suất đã bị hủy)

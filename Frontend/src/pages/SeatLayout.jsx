@@ -101,14 +101,29 @@ const SeatLayout = () => {
   const handleSeatClick = (seatId, row) => {
     if (occupiedSeats[seatId]) return; // Seat is occupied
 
+    const isCouple = coupleRows.includes(row);
+    let partnerId = null;
+    if (isCouple) {
+      const col = parseInt(seatId.substring(row.length), 10);
+      const partnerCol = col % 2 === 1 ? col + 1 : col - 1;
+      partnerId = `${row}${partnerCol}`;
+      if (occupiedSeats[partnerId]) {
+        alert(`Ghế đôi đi kèm (${partnerId}) đã có người đặt, không thể chọn ghế này.`);
+        return;
+      }
+    }
+
     if (selectedSeats.includes(seatId)) {
-      setSelectedSeats(prev => prev.filter(seat => seat !== seatId));
+      const toRemove = new Set([seatId]);
+      if (partnerId) toRemove.add(partnerId);
+      setSelectedSeats(prev => prev.filter(seat => !toRemove.has(seat)));
     } else {
-      if (selectedSeats.length >= 8) {
+      const toAdd = partnerId ? [seatId, partnerId] : [seatId];
+      if (selectedSeats.length + toAdd.length > 8) {
         alert('Bạn chỉ có thể chọn tối đa 8 ghế trong một lần đặt');
         return;
       }
-      setSelectedSeats(prev => [...prev, seatId]);
+      setSelectedSeats(prev => [...new Set([...prev, ...toAdd])]);
     }
   };
 

@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Clock, Star, Film, Ticket, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { axiosInstance } from '../api';
 import timeFormat from '../lib/timeFormat';
+import { resolveBackdrop } from '../utils/imageHelper';
 
 const HeroSection = () => {
   const navigate = useNavigate();
   const [movies, setMovies] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Gọi API lấy các phim đang chiếu nổi bật từ Database
   useEffect(() => {
@@ -17,9 +20,8 @@ const HeroSection = () => {
         setLoading(true);
         const res = await axiosInstance.get('/movies?status=now_showing&page=1&pageSize=5');
         const items = res?.items || (Array.isArray(res) ? res : []);
-        if (items.length > 0) {
-          setMovies(items);
-        }
+        setMovies(items);
+        setCurrentIndex(0);
       } catch (err) {
         console.warn('Lỗi khi tải phim cho banner từ database:', err);
       } finally {
@@ -28,7 +30,7 @@ const HeroSection = () => {
     };
 
     fetchHeroMovies();
-  }, []);
+  }, [refreshKey]);
 
   // Tự động chuyển phim nổi bật mỗi 7 giây nếu có nhiều phim
   useEffect(() => {
@@ -39,6 +41,50 @@ const HeroSection = () => {
     return () => clearInterval(timer);
   }, [movies.length]);
 
+  // T? l?m m?i khi qu?n tr? vi?n th?m, s?a ho?c x?a phim.
+  useEffect(() => {
+      let disposed = false;
+      let connection = null;
+
+      const connect = async () => {
+          const apiBaseUrl = (
+              import.meta.env.VITE_API_BASE_URL ||
+              'http://localhost:5000/api'
+          ).replace(/\/+$/, '');
+
+          const hubUrl =
+              apiBaseUrl.replace(/\/api$/i, '') + '/hubs/movies';
+
+          const newConnection = new HubConnectionBuilder()
+              .withUrl(hubUrl)
+              .withAutomaticReconnect()
+              .configureLogging(LogLevel.Warning)
+              .build();
+
+          connection = newConnection;
+          const refresh = () => {
+              if (!disposed) setRefreshKey((value) => value + 1);
+          };
+
+          newConnection.on('MovieCreated', refresh);
+          newConnection.on('MovieUpdated', refresh);
+          newConnection.on('MovieDeleted', refresh);
+          newConnection.onreconnected(refresh);
+
+          try {
+              await newConnection.start();
+              if (disposed) await newConnection.stop();
+          } catch (error) {
+              if (!disposed) console.warn('SignalR banner', error);
+          }
+      };
+
+      void connect();
+      return () => {
+          disposed = true;
+          if (connection) void connection.stop().catch(() => {});
+      };
+  }, []);
   const currentMovie = movies[currentIndex] || null;
 
   const nextMovie = () => {
@@ -76,7 +122,7 @@ const HeroSection = () => {
     ? `${currentMovie.ageRating} - Độ tuổi phù hợp`
     : 'Phù hợp mọi lứa tuổi';
 
-  const backdropImage = currentMovie?.backdropUrl || currentMovie?.posterUrl || '/backgroundImage.png';
+  const backdropImage = resolveBackdrop(currentMovie?.backdropUrl || currentMovie?.posterUrl, currentMovie?.id || currentMovie?.title);
 
   if (loading && !currentMovie) {
     return (
@@ -106,20 +152,11 @@ const HeroSection = () => {
           <span className="px-3 py-1 bg-red-600/90 text-white rounded-full text-xs font-black uppercase tracking-wider shadow-lg shadow-red-600/30 flex items-center gap-1.5">
             <Film className="w-3.5 h-3.5" /> Phim Chiếu Rạp Nổi Bật
           </span>
-          <span className="text-amber-400 font-semibold text-xs tracking-wider">
-            ⭐ {ratingStr} ĐÁNH GIÁ
-          </span>
         </div>
 
         <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold text-white mb-3 leading-tight tracking-tight">
           {currentMovie?.title || 'Phim Bom Tấn'}
         </h1>
-
-        {currentMovie?.originalTitle && currentMovie.originalTitle !== currentMovie.title && (
-          <p className="text-slate-400 font-mono text-sm md:text-base -mt-1 mb-4 italic">
-            {currentMovie.originalTitle}
-          </p>
-        )}
 
         <p className="text-slate-300 text-base md:text-lg mb-6 line-clamp-3 leading-relaxed max-w-2xl">
           {currentMovie?.overview || 'Khám phá câu chuyện điện ảnh đặc sắc với những tình tiết kịch tính cùng trải nghiệm rạp chiếu phim đỉnh cao.'}

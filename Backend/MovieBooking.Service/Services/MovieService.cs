@@ -1,36 +1,49 @@
 using Microsoft.EntityFrameworkCore;
 using MovieBooking.Data;
 using MovieBooking.Data.Entities;
+using MovieBooking.Data.Repositories.Interfaces;
 using MovieBooking.Service.DTOs;
 
 namespace MovieBooking.Service.Services;
 
 public class MovieService : IMovieService
 {
+    private readonly IMovieRepository _movieRepository;
+    private readonly IGenreRepository _genreRepository;
     private readonly AppDbContext _dbContext;
 
-    public MovieService(AppDbContext dbContext)
+    public MovieService(
+        IMovieRepository movieRepository,
+        IGenreRepository genreRepository,
+        AppDbContext dbContext)
     {
+        _movieRepository = movieRepository;
+        _genreRepository = genreRepository;
         _dbContext = dbContext;
     }
 
     public async Task<MovieListResponse> GetMoviesAsync(
         string? status,
         string? search,
+        string? genre,
+        string sortBy,
+        string? city,
+        Guid? cinemaId,
         int page,
         int pageSize,
         CancellationToken cancellationToken = default)
     {
-        var query = BuildMovieQuery(status, search);
-        var totalItems = await query.CountAsync(cancellationToken);
-        var movies = await query
-            .OrderByDescending(movie => movie.ReleaseDate)
-            .ThenBy(movie => movie.Title)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
-
-        await PopulateRelationsAsync(movies, cancellationToken);
+        var (movies, totalItems) =
+            await _movieRepository.GetMoviesPagedAsync(
+                status,
+                search,
+                genre,
+                sortBy,
+                city,
+                cinemaId,
+                page,
+                pageSize,
+                cancellationToken);
 
         return new MovieListResponse
         {
@@ -38,108 +51,399 @@ public class MovieService : IMovieService
             Page = page,
             PageSize = pageSize,
             TotalItems = totalItems,
-            TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize)
+            TotalPages = (int)Math.Ceiling(
+                totalItems / (double)pageSize)
         };
     }
 
-    public async Task<MovieDto?> GetMovieByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<MovieDto?> GetMovieByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
     {
-        var movie = await BuildMovieQuery(null, null)
-            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        var movie = await _movieRepository.GetMovieByIdAsync(
+            id,
+            cancellationToken);
 
-        if (movie is null)
-            return null;
+        return movie == null ? null : MapMovie(movie);
+    }
 
-        await PopulateRelationsAsync([movie], cancellationToken);
+    public async Task<List<GenreDto>> GetGenresAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var genres = await _genreRepository.GetAllAsync(cancellationToken);
+
+        return genres.Select(genre => new GenreDto
+        {
+            Id = genre.Id,
+            Name = genre.Name
+        }).ToList();
+    }
+
+    public async Task<MovieDto> CreateMovieAsync(
+        CreateMovieRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMovieRequest(request);
+
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+
+        var actors = await ResolveMovieActorsAsync(request.Actors, cancellationToken);
+
+        if (!await _movieRepository.GenresExistAsync(genreIds, cancellationToken))
+        {
+            throw new ArgumentException("Một hoặc nhiều thể loại không tồn tại.");
+        }
+
+        if (!await _movieRepository.DirectorsExistAsync(directorIds, cancellationToken))
+        {
+            throw new ArgumentException("Một hoặc nhiều đạo diễn không tồn tại.");
+        }
+
+        var actorIds = actors.Select(actor => actor.ActorId).ToList();
+
+        if (!await _movieRepository.ActorsExistAsync(actorIds, cancellationToken))
+        {
+            throw new ArgumentException("Một hoặc nhiều diễn viên không tồn tại.");
+        }
+
+        var now = DateTime.UtcNow;
+        var movieId = Guid.NewGuid();
+
+        var movie = new Movie
+        {
+            Id = movieId,
+            Title = request.Title.Trim(),
+            OriginalTitle = request.OriginalTitle,
+            Overview = request.Overview,
+            DurationMin = request.DurationMin,
+            AgeRating = request.AgeRating,
+            PosterUrl = request.PosterUrl,
+            BackdropUrl = request.BackdropUrl,
+            TrailerUrl = request.TrailerUrl,
+            ReleaseDate = request.ReleaseDate,
+            RatingScore = request.RatingScore,
+            Status = request.Status,
+            CreatedAt = now,
+            UpdatedAt = now,
+
+            MovieGenres = genreIds.Select(genreId => new MovieGenre
+            {
+                MovieId = movieId,
+                GenreId = genreId
+            }).ToList(),
+
+            MovieDirectors = directorIds.Select(directorId => new MovieDirector
+            {
+                MovieId = movieId,
+                DirectorId = directorId
+            }).ToList(),
+
+            MovieActors = actors.Select(actor => new MovieActor
+            {
+                MovieId = movieId,
+                ActorId = actor.ActorId,
+                CharacterName = actor.CharacterName
+            }).ToList()
+        };
+
+        await _movieRepository.AddMovieAsync(movie, cancellationToken);
+
+        await _movieRepository.PopulateRelationsAsync(
+            new List<Movie> { movie }, cancellationToken);
+
         return MapMovie(movie);
     }
 
-    public async Task<List<GenreDto>> GetGenresAsync(CancellationToken cancellationToken = default)
+    public async Task<MovieDto?> UpdateMovieAsync(
+        Guid id,
+        UpdateMovieRequest request,
+        CancellationToken cancellationToken = default)
     {
-        return await _dbContext.Genres
-            .AsNoTracking()
-            .OrderBy(genre => genre.Name)
-            .Select(genre => new GenreDto
-            {
-                Id = genre.Id,
-                Name = genre.Name
-            })
-            .ToListAsync(cancellationToken);
-    }
+        ValidateMovieRequest(request);
 
-    private IQueryable<Movie> BuildMovieQuery(string? status, string? search)
-    {
-        var query = _dbContext.Movies
-            .AsNoTracking()
-            .AsQueryable();
+        var movie = await _movieRepository.GetMovieByIdAsync(
+            id, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(status))
-            query = query.Where(movie => movie.Status == status);
-
-        if (!string.IsNullOrWhiteSpace(search))
+        if (movie == null)
         {
-            var normalizedSearch = search.Trim();
-            query = query.Where(movie =>
-                EF.Functions.ILike(movie.Title, $"%{normalizedSearch}%") ||
-                (movie.OriginalTitle != null && EF.Functions.ILike(movie.OriginalTitle, $"%{normalizedSearch}%")));
+            return null;
         }
 
-        return query;
+        var genreIds = request.GenreIds.Distinct().ToList();
+        var directorIds = request.DirectorIds.Distinct().ToList();
+
+        var actors = await ResolveMovieActorsAsync(request.Actors, cancellationToken);
+
+        if (!await _movieRepository.GenresExistAsync(
+                genreIds, cancellationToken))
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều thể loại không tồn tại.");
+        }
+
+        if (!await _movieRepository.DirectorsExistAsync(
+                directorIds, cancellationToken))
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều đạo diễn không tồn tại.");
+        }
+
+        var actorIds = actors.Select(actor => actor.ActorId).ToList();
+
+        if (!await _movieRepository.ActorsExistAsync(
+                actorIds, cancellationToken))
+        {
+            throw new ArgumentException(
+                "Một hoặc nhiều diễn viên không tồn tại.");
+        }
+
+        movie.Title = request.Title.Trim();
+        movie.OriginalTitle = request.OriginalTitle;
+        movie.Overview = request.Overview;
+        movie.DurationMin = request.DurationMin;
+        movie.AgeRating = request.AgeRating;
+        movie.PosterUrl = request.PosterUrl;
+        movie.BackdropUrl = request.BackdropUrl;
+        movie.TrailerUrl = request.TrailerUrl;
+        movie.ReleaseDate = request.ReleaseDate;
+        movie.RatingScore = request.RatingScore;
+        movie.Status = request.Status;
+        movie.UpdatedAt = DateTime.UtcNow;
+
+        movie.MovieGenres = genreIds.Select(genreId => new MovieGenre
+        {
+            MovieId = movie.Id,
+            GenreId = genreId
+        }).ToList();
+
+        movie.MovieDirectors = directorIds.Select(directorId => new MovieDirector
+        {
+            MovieId = movie.Id,
+            DirectorId = directorId
+        }).ToList();
+
+        movie.MovieActors = actors.Select(actor => new MovieActor
+        {
+            MovieId = movie.Id,
+            ActorId = actor.ActorId,
+            CharacterName = actor.CharacterName
+        }).ToList();
+
+        await _movieRepository.UpdateMovieAsync(
+            movie, cancellationToken);
+
+        var updatedMovie = await _movieRepository.GetMovieByIdAsync(
+            id, cancellationToken);
+
+        return updatedMovie == null ? null : MapMovie(updatedMovie);
     }
 
-    private async Task PopulateRelationsAsync(List<Movie> movies, CancellationToken cancellationToken)
+    public Task<bool> SoftDeleteMovieAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
     {
-        if (movies.Count == 0)
-            return;
+        return _movieRepository.SoftDeleteMovieAsync(
+            id, cancellationToken);
+    }
 
-        var movieIds = movies.Select(movie => movie.Id).ToHashSet();
-        var movieGenres = await _dbContext.MovieGenres
-            .FromSqlRaw("SELECT movie_id, genre_id FROM moviegenres")
-            .AsNoTracking()
-            .Where(movieGenre => movieIds.Contains(movieGenre.MovieId))
-            .ToListAsync(cancellationToken);
-        var movieDirectors = await _dbContext.MovieDirectors
-            .FromSqlRaw("SELECT movie_id, director_id FROM moviedirectors")
-            .AsNoTracking()
-            .Where(movieDirector => movieIds.Contains(movieDirector.MovieId))
-            .ToListAsync(cancellationToken);
-        var movieActors = await _dbContext.MovieActors
-            .FromSqlRaw("SELECT movie_id, actor_id, character_name FROM movieactors")
-            .AsNoTracking()
-            .Where(movieActor => movieIds.Contains(movieActor.MovieId))
-            .ToListAsync(cancellationToken);
+    public async Task<GenreDto> CreateGenreAsync(
+        GenreRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateGenreRequest(request);
 
-        var genreIds = movieGenres.Select(item => item.GenreId).ToHashSet();
-        var directorIds = movieDirectors.Select(item => item.DirectorId).ToHashSet();
-        var actorIds = movieActors.Select(item => item.ActorId).ToHashSet();
+        var name = request.Name.Trim();
 
-        var genres = await _dbContext.Genres
-            .AsNoTracking()
-            .Where(genre => genreIds.Contains(genre.Id))
-            .ToDictionaryAsync(genre => genre.Id, cancellationToken);
-        var directors = await _dbContext.Directors
-            .AsNoTracking()
-            .Where(director => directorIds.Contains(director.Id))
-            .ToDictionaryAsync(director => director.Id, cancellationToken);
-        var actors = await _dbContext.Actors
-            .AsNoTracking()
-            .Where(actor => actorIds.Contains(actor.Id))
-            .ToDictionaryAsync(actor => actor.Id, cancellationToken);
-
-        foreach (var movie in movies)
+        if (await _genreRepository.ExistsByNameAsync(
+                name, cancellationToken: cancellationToken))
         {
-            movie.MovieGenres = movieGenres
-                .Where(item => item.MovieId == movie.Id && genres.ContainsKey(item.GenreId))
-                .Select(item => new MovieGenre { MovieId = item.MovieId, GenreId = item.GenreId, Genre = genres[item.GenreId] })
-                .ToList();
-            movie.MovieDirectors = movieDirectors
-                .Where(item => item.MovieId == movie.Id && directors.ContainsKey(item.DirectorId))
-                .Select(item => new MovieDirector { MovieId = item.MovieId, DirectorId = item.DirectorId, Director = directors[item.DirectorId] })
-                .ToList();
-            movie.MovieActors = movieActors
-                .Where(item => item.MovieId == movie.Id && actors.ContainsKey(item.ActorId))
-                .Select(item => new MovieActor { MovieId = item.MovieId, ActorId = item.ActorId, CharacterName = item.CharacterName, Actor = actors[item.ActorId] })
-                .ToList();
+            throw new ArgumentException("Tên thể loại đã tồn tại.");
+        }
+
+        var genre = new Genre
+        {
+            Id = Guid.NewGuid(),
+            Name = name
+        };
+
+        await _genreRepository.AddAsync(genre, cancellationToken);
+
+        return new GenreDto
+        {
+            Id = genre.Id,
+            Name = genre.Name
+        };
+    }
+
+    public async Task<GenreDto?> UpdateGenreAsync(
+        Guid id,
+        GenreRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateGenreRequest(request);
+
+        var genre = await _genreRepository.GetByIdAsync(
+            id, cancellationToken);
+
+        if (genre == null)
+        {
+            return null;
+        }
+
+        var name = request.Name.Trim();
+
+        if (await _genreRepository.ExistsByNameAsync(
+                name, id, cancellationToken))
+        {
+            throw new ArgumentException("Tên thể loại đã tồn tại.");
+        }
+
+        genre.Name = name;
+
+        await _genreRepository.UpdateAsync(
+            genre, cancellationToken);
+
+        return new GenreDto
+        {
+            Id = genre.Id,
+            Name = genre.Name
+        };
+    }
+
+    public async Task<bool> DeleteGenreAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var genre = await _genreRepository.GetByIdAsync(
+            id, cancellationToken);
+
+        if (genre == null)
+        {
+            return false;
+        }
+
+        var deleted = await _genreRepository.DeleteAsync(
+            id, cancellationToken);
+
+        if (!deleted)
+        {
+            throw new ArgumentException(
+                "Không thể xóa thể loại đang được sử dụng bởi phim.");
+        }
+
+        return true;
+    }
+
+    private async Task<List<(Guid ActorId, string? CharacterName)>> ResolveMovieActorsAsync(
+        IEnumerable<MovieActorRequest>? requests,
+        CancellationToken cancellationToken)
+    {
+        var resolved = new Dictionary<Guid, (Guid ActorId, string? CharacterName)>();
+
+        foreach (var actorRequest in requests ?? Enumerable.Empty<MovieActorRequest>())
+        {
+            var name = actorRequest.Name?.Trim();
+            Actor? actor = null;
+
+            // Ưu tiên ID nếu là diễn viên đã có.
+            if (actorRequest.ActorId is Guid requestedId &&
+                requestedId != Guid.Empty)
+            {
+                actor = await _dbContext.Actors.FirstOrDefaultAsync(
+                    x => x.Id == requestedId,
+                    cancellationToken);
+            }
+
+            // Nếu chưa tìm được theo ID, tìm bằng tên không phân biệt hoa/thường.
+            if (actor is null && !string.IsNullOrWhiteSpace(name))
+            {
+                var normalizedName = name.ToLower();
+
+                actor = await _dbContext.Actors.FirstOrDefaultAsync(
+                    x => x.Name.ToLower() == normalizedName,
+                    cancellationToken);
+            }
+
+            // Chưa tồn tại thì tạo diễn viên mới.
+            if (actor is null)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                    throw new ArgumentException(
+                        "Diễn viên mới phải có tên.");
+
+                actor = new Actor
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name,
+                    ProfilePath = string.IsNullOrWhiteSpace(actorRequest.ProfilePath)
+                        ? null
+                        : actorRequest.ProfilePath.Trim()
+                };
+
+                _dbContext.Actors.Add(actor);
+            }
+            else
+            {
+                // Cập nhật thông tin nếu người dùng cung cấp dữ liệu mới.
+                if (!string.IsNullOrWhiteSpace(name))
+                    actor.Name = name;
+
+                if (!string.IsNullOrWhiteSpace(actorRequest.ProfilePath))
+                    actor.ProfilePath = actorRequest.ProfilePath.Trim();
+            }
+
+            // Một diễn viên chỉ được liên kết một lần với cùng phim.
+            if (!resolved.ContainsKey(actor.Id))
+            {
+                resolved.Add(
+                    actor.Id,
+                    (
+                        actor.Id,
+                        string.IsNullOrWhiteSpace(actorRequest.CharacterName)
+                            ? null
+                            : actorRequest.CharacterName.Trim()
+                    ));
+            }
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return resolved.Values.ToList();
+    }
+
+    private static void ValidateMovieRequest(
+        CreateMovieRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            throw new ArgumentException(
+                "Tên phim không được để trống.");
+
+        if (request.DurationMin <= 0)
+            throw new ArgumentException(
+                "Thời lượng phim phải lớn hơn 0.");
+
+        if (request.RatingScore is < 0 or > 10)
+            throw new ArgumentException(
+                "Điểm đánh giá phải từ 0 đến 10.");
+
+        if (request.GenreIds.Count == 0)
+            throw new ArgumentException(
+                "Phải chọn ít nhất một thể loại.");
+
+        if (request.Actors.Any(x =>
+                (!x.ActorId.HasValue || x.ActorId == Guid.Empty) &&
+                string.IsNullOrWhiteSpace(x.Name)))
+            throw new ArgumentException(
+                "Mỗi diễn viên cần có tên hoặc Actor ID hợp lệ.");
+    }
+
+    private static void ValidateGenreRequest(GenreRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Name))
+        {
+            throw new ArgumentException(
+                "Tên thể loại không được để trống.");
         }
     }
 
@@ -159,22 +463,29 @@ public class MovieService : IMovieService
             ReleaseDate = movie.ReleaseDate,
             RatingScore = movie.RatingScore,
             Status = movie.Status,
+
             Genres = movie.MovieGenres
-                .OrderBy(movieGenre => movieGenre.Genre.Name)
-                .Select(movieGenre => movieGenre.Genre.Name)
+                .OrderBy(relation => relation.Genre.Name)
+                .Select(relation => relation.Genre.Name)
                 .ToList(),
+
             Directors = movie.MovieDirectors
-                .OrderBy(movieDirector => movieDirector.Director.Name)
-                .Select(movieDirector => movieDirector.Director.Name)
+                .OrderBy(relation => relation.Director.Name)
+                .Select(relation => relation.Director.Name)
                 .ToList(),
+
+            DirectorIds = movie.MovieDirectors
+                .Select(relation => relation.DirectorId)
+                .ToList(),
+
             Actors = movie.MovieActors
-                .OrderBy(movieActor => movieActor.Actor.Name)
-                .Select(movieActor => new MovieActorDto
+                .OrderBy(relation => relation.Actor.Name)
+                .Select(relation => new MovieActorDto
                 {
-                    ActorId = movieActor.ActorId,
-                    Name = movieActor.Actor.Name,
-                    ProfilePath = movieActor.Actor.ProfilePath,
-                    CharacterName = movieActor.CharacterName
+                    ActorId = relation.ActorId,
+                    Name = relation.Actor.Name,
+                    ProfilePath = relation.Actor.ProfilePath,
+                    CharacterName = relation.CharacterName
                 })
                 .ToList()
         };

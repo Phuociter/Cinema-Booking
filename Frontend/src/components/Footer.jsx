@@ -96,8 +96,8 @@ const Footer = () => {
 
   const contactInfo = [
     { icon: Phone, title: "Hotline", content: "+84 123 456 789", href: "tel:+84123456789" },
-    { icon: Mail, title: "Email", content: "contact@moviehub.vn", href: "mailto:contact@moviehub.vn" },
-    { icon: MapPin, title: "Địa chỉ", content: "123 Nguyễn Huệ, Q.1", href: "#" }
+    { icon: Mail, title: "Email", content: "contact@movie.vn", href: "mailto:contact@moviehub.vn" },
+    { icon: MapPin, title: "Địa chỉ", content: "TP.Hồ Chí Minh", href: "#" }
   ];
 
   return (

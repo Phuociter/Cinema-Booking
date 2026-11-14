@@ -7,7 +7,7 @@ export const AdminLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-zinc-950 text-zinc-100 font-sans">
+    <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100 font-sans">
       {/* Sidebar điều hướng */}
       <AdminSidebar
         isOpen={isSidebarOpen}

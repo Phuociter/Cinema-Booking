@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useShowtimes } from '../api';
+import { resolvePoster, handleImageError } from '../utils/imageHelper';
 import { 
   Calendar, 
   Clock, 
@@ -9,7 +10,6 @@ import {
   X, 
   Film, 
   MapPin, 
-  Star,
   Sparkles,
   ChevronRight,
   ChevronLeft
@@ -290,22 +290,18 @@ const Releases = () => {
                   <div>
                     <div className="relative overflow-hidden rounded-2xl mb-3.5 aspect-[2/3]">
                       <img
-                        src={movie.posterUrl || 'https://picsum.photos/400/600'}
+                        src={resolvePoster(movie.posterUrl, movie.id || movie.title)}
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         loading="lazy"
+                        onError={(e) => handleImageError(e, movie.id || movie.title)}
                       />
                       <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                         <span className="px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md border border-white/20 text-white text-[10px] font-bold">
                           {movie.ageRating || 'P'}
                         </span>
                       </div>
-                      {movie.ratingScore && (
-                        <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md border border-white/20 text-amber-400 text-xs font-bold flex items-center gap-1">
-                          <Star className="w-3 h-3 fill-amber-400" />
-                          {movie.ratingScore}
-                        </div>
-                      )}
+
                     </div>
 
                     <h3 className="font-bold text-white text-base sm:text-lg mb-1 line-clamp-1 group-hover:text-red-400 transition-colors" title={movie.title}>

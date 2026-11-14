@@ -132,4 +132,59 @@ public class ShowtimeRepository : GenericRepository<Showtime>, IShowtimeReposito
 
         return !string.IsNullOrWhiteSpace(status) ? query : query.Where(s => s.StartTime >= nowUtc);
     }
+
+    public async Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction> BeginTransactionAsync()
+    {
+        return await _context.Database.BeginTransactionAsync();
+    }
+
+    public override async Task<Showtime?> GetByIdAsync(Guid id)
+    {
+        return await _context.Showtimes.FirstOrDefaultAsync(s => s.Id == id);
+    }
+
+    public async Task<Showtime?> GetByIdNoTrackingAsync(Guid id)
+    {
+        return await _context.Showtimes.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id);
+    }
+
+    public async Task<bool> HasActiveOverlapAsync(Guid? excludeShowtimeId, Guid auditoriumId, DateTime startTime, DateTime endTime)
+    {
+        return await _context.Showtimes.AnyAsync(s =>
+            (!excludeShowtimeId.HasValue || s.Id != excludeShowtimeId.Value)
+            && s.AuditoriumId == auditoriumId
+            && s.Status != ShowtimeStatus.Cancelled
+            && s.StartTime < endTime
+            && s.EndTime > startTime);
+    }
+
+    public async Task<Movie?> GetActiveMovieAsync(Guid movieId)
+    {
+        return await _context.Movies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == movieId && m.DeletedAt == null);
+    }
+
+    public async Task<Auditorium?> GetActiveAuditoriumWithCinemaAsync(Guid auditoriumId)
+    {
+        return await _context.Auditoriums
+            .Include(a => a.Cinema)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == auditoriumId && a.DeletedAt == null);
+    }
+
+    public async Task<List<Seat>> GetSeatsByAuditoriumAsync(Guid auditoriumId)
+    {
+        return await _context.Seats
+            .AsNoTracking()
+            .Where(s => s.AuditoriumId == auditoriumId)
+            .ToListAsync();
+    }
+
+    public async Task AddWithSeatsAsync(Showtime showtime, IEnumerable<ShowtimeSeat> seats)
+    {
+        _context.Showtimes.Add(showtime);
+        await _context.ShowtimeSeats.AddRangeAsync(seats);
+        await _context.SaveChangesAsync();
+    }
 }

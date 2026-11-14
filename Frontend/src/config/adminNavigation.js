@@ -3,6 +3,7 @@ import {
   Film,
   Building2,
   CalendarDays,
+  Ticket,
   Popcorn,
   Users,
 } from 'lucide-react';
@@ -31,6 +32,12 @@ export const ADMIN_MODULES = [
     label: 'Lịch chiếu',
     path: '/admin/showtimes',
     icon: CalendarDays,
+  },
+  {
+    id: 'orders',
+    label: 'Đơn đặt vé',
+    path: '/admin/orders',
+    icon: Ticket,
   },
   {
     id: 'snacks',
