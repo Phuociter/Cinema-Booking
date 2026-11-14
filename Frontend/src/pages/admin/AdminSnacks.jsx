@@ -70,29 +70,29 @@ const AdminSnacks = () => {
     // ==========================================
     const fetchCinemas = async () => {
         try {
-            const res = await axiosInstance.get('/api/cinemas');
-            setCinemas(res.data);
-        } catch  {
+            const res = await axiosInstance.get('/cinemas');
+            setCinemas(Array.isArray(res) ? res : res?.data || []);
+        } catch {
             toast.error('Không thể tải danh sách rạp từ hệ thống!');
         }
     };
 
     const fetchMasterSnacks = async () => {
         try {
-            const res = await axiosInstance.get('/api/snacks'); // Kho tổng master snacks
-            setMasterSnacks(res.data);
-        } catch  {
+            const res = await axiosInstance.get('/snacks'); // Kho tổng master snacks
+            setMasterSnacks(Array.isArray(res) ? res : res?.data || []);
+        } catch {
             toast.error('Không thể tải dữ liệu kho tổng!');
         }
     };
 
-    const fetchCinemaSnacks = async (cinemaId) => {
+    const fetchCinemaSnacks = async (cinemaId = selectedCinemaId) => {
         if (!cinemaId) return;
         setLoading(true);
         try {
-            const res = await axiosInstance.get(`/api/cinemas/${cinemaId}/snacks`);
-            setCinemaSnacks(res.data);
-        } catch  {
+            const res = await axiosInstance.get(`/cinemas/${cinemaId}/snacks`);
+            setCinemaSnacks(Array.isArray(res) ? res : res?.data || []);
+        } catch {
             toast.error('Không thể tải thực đơn bắp nước của rạp!');
             setCinemaSnacks([]);
         } finally {
