@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Trash2, Heart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
+import { resolvePoster, handleImageError } from '../utils/imageHelper';
 
 const FAVORITES_KEY = 'cinema_favorites';
 const FAVORITES_EVENT = 'cinema-favorites-updated';
@@ -94,8 +95,10 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
             .filter(Boolean).join(' • ')
         : (typeof movie.genre === 'string' ? movie.genre : '');
 
-    const posterSrc = movie.posterUrl || movie.poster_path ||
-        movie.backdropUrl || movie.backdrop_path;
+    const posterSrc = resolvePoster(
+        movie.posterUrl || movie.poster_path || movie.backdropUrl || movie.backdrop_path,
+        movie.id || movie.title
+    );
     const releaseDate = movie.releaseDate || movie.release_date;
     const durationMinutes = movie.duration || movie.durationMin || movie.runtime;
 
@@ -113,13 +116,7 @@ const MovieCard = ({ movie, viewMode = 'grid', onRemove }) => {
             >
                 <img
                     src={posterSrc}
-                    onError={(event) => {
-                        const image = event.currentTarget;
-                        image.onerror = null;
-                        if (!image.src.endsWith('/backgroundImage.png')) {
-                            image.src = '/backgroundImage.png';
-                        }
-                    }}
+                    onError={(event) => handleImageError(event, movie.id || movie.title)}
                     alt={`${movie.title || 'Movie'} poster`}
                     loading="lazy"
                     className="rounded-lg h-56 w-full object-cover transition-transform duration-300 group-hover:scale-105"

@@ -1,9 +1,10 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Clock, Star, Film, Ticket, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { axiosInstance } from '../api';
 import timeFormat from '../lib/timeFormat';
+import { resolveBackdrop } from '../utils/imageHelper';
 
 const HeroSection = () => {
   const navigate = useNavigate();
@@ -121,7 +122,7 @@ const HeroSection = () => {
     ? `${currentMovie.ageRating} - Độ tuổi phù hợp`
     : 'Phù hợp mọi lứa tuổi';
 
-  const backdropImage = currentMovie?.backdropUrl || currentMovie?.posterUrl || '/backgroundImage.png';
+  const backdropImage = resolveBackdrop(currentMovie?.backdropUrl || currentMovie?.posterUrl, currentMovie?.id || currentMovie?.title);
 
   if (loading && !currentMovie) {
     return (

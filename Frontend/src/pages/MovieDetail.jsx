@@ -19,6 +19,7 @@ import { axiosInstance } from '../api';
 import BlurCircle from '../components/BlurCircle';
 import MovieCard from '../components/MovieCard';
 import CityShowtimeModal from '../components/booking/CityShowtimeModal';
+import { resolvePoster, resolveBackdrop, handleImageError } from '../utils/imageHelper';
 
 const ActorAvatar = ({ actor }) => {
   const [imageFailed, setImageFailed] = useState(!actor?.profilePath);
@@ -258,8 +259,8 @@ const MovieDetail = () => {
     );
   }
 
-  const backdropSrc = movie.backdropUrl || movie.posterUrl || '/backgroundImage.png';
-  const posterSrc = movie.posterUrl || movie.backdropUrl || '/backgroundImage.png';
+  const backdropSrc = resolveBackdrop(movie.backdropUrl || movie.posterUrl, movie.id || movie.title);
+  const posterSrc = resolvePoster(movie.posterUrl || movie.backdropUrl, movie.id || movie.title);
   const releaseYear = movie.releaseDate ? new Date(movie.releaseDate).getFullYear() : 'N/A';
   const formattedReleaseDate = movie.releaseDate
     ? new Date(movie.releaseDate).toLocaleDateString('vi-VN')
@@ -284,7 +285,7 @@ const MovieDetail = () => {
               <img
                 src={posterSrc}
                 alt={`Poster phim ${movie.title}`}
-                onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = "/backgroundImage.png"; }}
+                onError={(event) => handleImageError(event, movie.id || movie.title)}
                 className="w-full max-w-xs md:max-w-sm rounded-2xl shadow-2xl object-cover h-[450px] border border-white/10"
                 loading="lazy"
               />

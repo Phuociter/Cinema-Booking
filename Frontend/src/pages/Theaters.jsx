@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCinemas } from '../api';
+import { resolveCinemaImage, handleImageError } from '../utils/imageHelper';
 import {
   MapPin,
   Clock,
@@ -202,14 +203,11 @@ const Theaters = () => {
                     {/* Hình ảnh rạp */}
                     <div className="relative h-44 rounded-xl overflow-hidden mb-3 bg-slate-950">
                       <img
-                        src={theater.imageUrl || 'https://picsum.photos/seed/cinema/800/500'}
+                        src={resolveCinemaImage(theater.imageUrl)}
                         alt={theater.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         loading="lazy"
-                        onError={(e) => {
-                          e.target.onerror = null;
-                          e.target.src = 'https://picsum.photos/seed/cinema/800/500';
-                        }}
+                        onError={(e) => handleImageError(e, resolveCinemaImage(''))}
                       />
                       <div className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-black/60 backdrop-blur-md text-emerald-400 border border-white/10">
                         {theater.city || 'Việt Nam'}

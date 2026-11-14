@@ -1,9 +1,4 @@
-﻿namespace MovieBooking.Service.DTOs;
-
-public sealed class GenreRequest
-{
-    public string Name { get; set; } = string.Empty;
-}
+namespace MovieBooking.Service.DTOs;
 
 public sealed class GenreMutationResult
 {

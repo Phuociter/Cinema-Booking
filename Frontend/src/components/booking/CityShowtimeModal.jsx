@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useShowtimes } from '../../api';
+import { resolvePoster, handleImageError } from '../../utils/imageHelper';
 import { 
   X, 
   Calendar, 
@@ -221,7 +222,8 @@ const CityShowtimeModal = ({ isOpen, onClose, movie, initialDate }) => {
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pr-12">
             <img
-              src={movie.posterUrl || 'https://picsum.photos/300/450'}
+              src={resolvePoster(movie.posterUrl, movie.id || movie.title)}
+              onError={(e) => handleImageError(e, movie.id || movie.title)}
               alt={movie.title}
               className="w-16 h-24 sm:w-20 sm:h-28 object-cover rounded-xl shadow-lg border border-white/10 flex-shrink-0"
             />
