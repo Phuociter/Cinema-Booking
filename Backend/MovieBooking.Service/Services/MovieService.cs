@@ -474,6 +474,10 @@ public class MovieService : IMovieService
                 .Select(relation => relation.Director.Name)
                 .ToList(),
 
+            DirectorIds = movie.MovieDirectors
+                .Select(relation => relation.DirectorId)
+                .ToList(),
+
             Actors = movie.MovieActors
                 .OrderBy(relation => relation.Actor.Name)
                 .Select(relation => new MovieActorDto
