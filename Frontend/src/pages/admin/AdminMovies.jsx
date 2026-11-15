@@ -1,10 +1,11 @@
-﻿
+
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     Search, Plus, Pencil, Trash2, Film, X, Loader2, RefreshCw,
     Users, ChevronLeft, ChevronRight, UserRound, Save,
 } from 'lucide-react';
 import { useMovies, useActors } from '../../api';
+import { EmptyState, Pagination, TableContainer } from '../../components/admin/ui';
 
 const EMPTY_FORM = {
     title: '',
@@ -29,9 +30,9 @@ const EMPTY_ACTOR_FORM = {
 };
 
 const inputClass =
-    'w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-red-500 placeholder:text-slate-500';
+    'w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-primary placeholder:text-zinc-500';
 
-const labelClass = 'mb-1.5 block text-xs font-medium text-slate-300';
+const labelClass = 'mb-1.5 block text-xs font-medium text-zinc-300';
 
 const getItems = (result) => {
     if (Array.isArray(result)) return result;
@@ -57,6 +58,8 @@ const AdminMovies = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [search, setSearch] = useState('');
+    const [moviePage, setMoviePage] = useState(1);
+    const [moviePageSize, setMoviePageSize] = useState(10);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
     const [modalOpen, setModalOpen] = useState(false);
@@ -68,7 +71,7 @@ const AdminMovies = () => {
     const [actorSaving, setActorSaving] = useState(false);
     const [actorSearch, setActorSearch] = useState('');
     const [actorPage, setActorPage] = useState(1);
-    const [actorPageSize] = useState(50);
+    const [actorPageSize, setActorPageSize] = useState(50);
     const [actorTotal, setActorTotal] = useState(0);
     const [actorModalOpen, setActorModalOpen] = useState(false);
     const [editingActorId, setEditingActorId] = useState(null);
@@ -328,6 +331,16 @@ const AdminMovies = () => {
         (movie.title || '').toLowerCase().includes(search.trim().toLowerCase())
     );
 
+    const paginatedMovies = filteredMovies.slice(
+        (moviePage - 1) * moviePageSize,
+        moviePage * moviePageSize
+    );
+
+    useEffect(() => {
+        const totalPages = Math.max(1, Math.ceil(filteredMovies.length / moviePageSize));
+        if (moviePage > totalPages) setMoviePage(totalPages);
+    }, [filteredMovies.length, moviePage, moviePageSize]);
+
     // Actor form
     const openCreateActor = () => {
         setEditingActorId(null);
@@ -427,18 +440,18 @@ const AdminMovies = () => {
     };
 
     return (
-        <main className="min-h-screen bg-slate-950 px-4 py-6 text-white sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-7xl space-y-6">
+        <main className="min-h-screen bg-zinc-950 px-4 py-2 text-white sm:px-6 sm:py-3">
+            <div className="mx-auto max-w-7xl space-y-2">
                 <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-red-400">
+                        <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
                             <Film size={15} />
                             Cinema management
                         </div>
-                        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                        <h1 className="text-lg font-bold tracking-tight sm:text-xl">
                             Quản lý phim và diễn viên
                         </h1>
-                        <p className="mt-1 text-sm text-slate-400">
+                        <p className="mt-1 text-xs text-zinc-400">
                             Quản lý danh mục phim, diễn viên và thông tin nhân vật.
                         </p>
                     </div>
@@ -454,7 +467,7 @@ const AdminMovies = () => {
                             }
                         }}
                         disabled={loading || actorLoading}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-50"
                     >
                         <RefreshCw
                             size={16}
@@ -465,7 +478,7 @@ const AdminMovies = () => {
                 </header>
 
                 {/* Tabs */}
-                <div className="flex gap-2 border-b border-white/10">
+                <div className="flex gap-2 border-b border-zinc-800">
                     <button
                         type="button"
                         onClick={() => {
@@ -474,8 +487,8 @@ const AdminMovies = () => {
                             setNotice('');
                         }}
                         className={`inline-flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-semibold transition ${activeTab === 'movies'
-                                ? 'border-red-500 text-red-400'
-                                : 'border-transparent text-slate-400 hover:text-white'
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-zinc-400 hover:text-white'
                             }`}
                     >
                         <Film size={17} />
@@ -493,8 +506,8 @@ const AdminMovies = () => {
                             setNotice('');
                         }}
                         className={`inline-flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-semibold transition ${activeTab === 'actors'
-                                ? 'border-red-500 text-red-400'
-                                : 'border-transparent text-slate-400 hover:text-white'
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-zinc-400 hover:text-white'
                             }`}
                     >
                         <Users size={17} />
@@ -525,358 +538,350 @@ const AdminMovies = () => {
 
                 {/* MOVIES TAB */}
                 {activeTab === 'movies' && (
-                    <>
-                        <div className="flex justify-end">
-                            <button
-                                type="button"
-                                onClick={openCreate}
-                                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold transition hover:bg-red-500"
-                            >
-                                <Plus size={17} />
-                                Thêm phim
-                            </button>
-                        </div>
+                    <div className="space-y-2">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h2 className="text-sm font-semibold text-zinc-100">
+                                    Danh sách phim
+                                </h2>
+                                <p className="mt-1 text-xs text-zinc-400">
+                                    {filteredMovies.length} phim phù hợp
+                                </p>
+                            </div>
 
-                        <section className="overflow-hidden rounded-xl border border-white/10 bg-slate-900/70">
-                            <div className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <h2 className="font-semibold text-white">Danh sách phim</h2>
-                                    <p className="mt-1 text-xs text-slate-400">
-                                        {filteredMovies.length} phim phù hợp
-                                    </p>
-                                </div>
-
-                                <div className="relative w-full sm:max-w-xs">
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                                <div className="relative w-full sm:w-64">
                                     <Search
-                                        size={16}
-                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                                        size={15}
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
                                     />
                                     <input
                                         value={search}
-                                        onChange={(event) => setSearch(event.target.value)}
+                                        onChange={(event) => {
+                                            setSearch(event.target.value);
+                                            setMoviePage(1);
+                                        }}
                                         placeholder="Tìm theo tên phim..."
-                                        className={`${inputClass} pl-9`}
+                                        className={`${inputClass} rounded-md py-2 pl-9`}
                                         aria-label="Tìm phim theo tên"
                                     />
                                 </div>
-                            </div>
 
-                            {loading ? (
-                                <div className="flex items-center justify-center gap-3 py-16 text-sm text-slate-400">
-                                    <Loader2 className="animate-spin" size={20} />
-                                    Đang tải danh sách phim...
-                                </div>
-                            ) : filteredMovies.length === 0 ? (
-                                <div className="px-6 py-16 text-center">
-                                    <Film size={34} className="mx-auto mb-3 text-slate-600" />
-                                    <p className="font-medium text-slate-200">
-                                        {search
-                                            ? 'Không tìm thấy phim phù hợp'
-                                            : 'Chưa có dữ liệu phim'}
-                                    </p>
-                                    <p className="mt-1 text-sm text-slate-500">
-                                        {search
-                                            ? 'Thử từ khóa khác hoặc xóa nội dung tìm kiếm.'
-                                            : 'Bạn có thể thêm phim mới bằng nút phía trên.'}
-                                    </p>
-                                    {search && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setSearch('')}
-                                            className="mt-4 text-sm font-medium text-red-400 hover:text-red-300"
-                                        >
-                                            Xóa tìm kiếm
-                                        </button>
-                                    )}
+                                <button
+                                    type="button"
+                                    onClick={openCreate}
+                                    className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-xs font-semibold text-white transition hover:brightness-110"
+                                >
+                                    <Plus size={15} />
+                                    Thêm phim
+                                </button>
+                            </div>
+                        </div>
+
+                        <TableContainer
+                            className="h-[calc(100vh-245px)] min-h-[360px]"
+                            isLoading={loading}
+                            loadingText="Đang tải danh sách phim..."
+                            pagination={
+                                <Pagination
+                                    page={moviePage}
+                                    pageSize={moviePageSize}
+                                    total={filteredMovies.length}
+                                    itemCount={paginatedMovies.length}
+                                    onPageChange={setMoviePage}
+                                    onPageSizeChange={(size) => {
+                                        setMoviePageSize(size);
+                                        setMoviePage(1);
+                                    }}
+                                    disabled={loading}
+                                />
+                            }
+                        >
+                            {filteredMovies.length === 0 && !loading ? (
+                                <div className="p-6">
+                                    <EmptyState
+                                        icon={Film}
+                                        title={
+                                            search
+                                                ? 'Không tìm thấy phim phù hợp'
+                                                : 'Chưa có dữ liệu phim'
+                                        }
+                                        description={
+                                            search
+                                                ? 'Thử từ khóa khác hoặc xóa nội dung tìm kiếm.'
+                                                : 'Bạn có thể thêm phim mới bằng nút phía trên.'
+                                        }
+                                        action={
+                                            search ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSearch('');
+                                                        setMoviePage(1);
+                                                    }}
+                                                    className="text-xs font-medium text-primary hover:brightness-125"
+                                                >
+                                                    Xóa tìm kiếm
+                                                </button>
+                                            ) : null
+                                        }
+                                    />
                                 </div>
                             ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full min-w-[760px] text-left text-sm">
-                                        <thead className="bg-slate-950/70 text-xs uppercase tracking-wide text-slate-400">
-                                            <tr>
-                                                <th className="px-4 py-3 font-medium">Phim</th>
-                                                <th className="px-4 py-3 font-medium">Thể loại</th>
-                                                <th className="px-4 py-3 font-medium">Thời lượng</th>
-                                                <th className="px-4 py-3 font-medium">Trạng thái</th>
-                                                <th className="px-4 py-3 text-right font-medium">
-                                                    Thao tác
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-white/5">
-                                            {filteredMovies.map((movie) => (
-                                                <tr
-                                                    key={movie.id}
-                                                    className="transition hover:bg-white/[0.025]"
-                                                >
-                                                    <td className="px-4 py-3">
-                                                        <div className="flex items-center gap-3">
-                                                            <img
-                                                                src={movie.posterUrl || '/backgroundImage.png'}
-                                                                alt=""
-                                                                onError={(event) => {
-                                                                    event.currentTarget.onerror = null;
-                                                                    event.currentTarget.src =
-                                                                        '/backgroundImage.png';
-                                                                }}
-                                                                className="h-14 w-10 rounded-md border border-white/10 bg-slate-800 object-cover"
-                                                            />
-                                                            <div className="max-w-xs">
-                                                                <p className="font-semibold text-slate-100">
-                                                                    {movie.title}
-                                                                </p>
-                                                                <p className="mt-1 truncate text-xs text-slate-500">
-                                                                    {movie.originalTitle || movie.id}
-                                                                </p>
-                                                            </div>
+                                <table className="w-full min-w-[760px] border-collapse text-left text-xs sm:text-sm">
+                                    <thead className="sticky top-0 z-10 select-none border-b border-zinc-800 bg-zinc-900 shadow-sm shadow-black/50">
+                                        <tr className="text-xs font-semibold text-zinc-300">
+                                            <th className="bg-zinc-900 px-4 py-3">Phim</th>
+                                            <th className="bg-zinc-900 px-4 py-3">Thể loại</th>
+                                            <th className="bg-zinc-900 px-4 py-3">Thời lượng</th>
+                                            <th className="bg-zinc-900 px-4 py-3">Trạng thái</th>
+                                            <th className="bg-zinc-900 px-4 py-3 text-right">Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-zinc-800/60">
+                                        {paginatedMovies.map((movie) => (
+                                            <tr
+                                                key={movie.id}
+                                                className="transition-colors hover:bg-zinc-900/50"
+                                            >
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <img
+                                                            src={movie.posterUrl || '/backgroundImage.png'}
+                                                            alt=""
+                                                            onError={(event) => {
+                                                                event.currentTarget.onerror = null;
+                                                                event.currentTarget.src = '/backgroundImage.png';
+                                                            }}
+                                                            className="h-14 w-10 rounded-md border border-zinc-800 bg-zinc-800 object-cover"
+                                                        />
+                                                        <div className="max-w-xs min-w-0">
+                                                            <p className="font-medium text-zinc-100">
+                                                                {movie.title}
+                                                            </p>
+                                                            <p className="mt-1 truncate text-xs text-zinc-400">
+                                                                {movie.originalTitle || movie.id}
+                                                            </p>
                                                         </div>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-slate-300">
-                                                        {Array.isArray(movie.genres) &&
-                                                            movie.genres.length
-                                                            ? movie.genres
-                                                                .map((genre) =>
-                                                                    typeof genre === 'string'
-                                                                        ? genre
-                                                                        : genre.name
-                                                                )
-                                                                .filter(Boolean)
-                                                                .join(', ')
-                                                            : 'Chưa phân loại'}
-                                                    </td>
-                                                    <td className="px-4 py-3 text-slate-300">
-                                                        {movie.durationMin || '—'} phút
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <span
-                                                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${movie.status === 'now_showing'
-                                                                    ? 'bg-emerald-500/10 text-emerald-300'
-                                                                    : movie.status === 'coming_soon'
-                                                                        ? 'bg-amber-500/10 text-amber-300'
-                                                                        : 'bg-slate-700 text-slate-300'
-                                                                }`}
-                                                        >
-                                                            {movie.status === 'now_showing'
-                                                                ? 'Đang chiếu'
+                                                    </div>
+                                                </td>
+
+                                                <td className="px-4 py-3 text-zinc-300">
+                                                    {Array.isArray(movie.genres) && movie.genres.length
+                                                        ? movie.genres
+                                                            .map((genre) =>
+                                                                typeof genre === 'string'
+                                                                    ? genre
+                                                                    : genre.name
+                                                            )
+                                                            .filter(Boolean)
+                                                            .join(', ')
+                                                        : 'Chưa phân loại'}
+                                                </td>
+
+                                                <td className="px-4 py-3 font-mono text-zinc-200">
+                                                    {movie.durationMin || '—'} phút
+                                                </td>
+
+                                                <td className="px-4 py-3">
+                                                    <span
+                                                        className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${
+                                                            movie.status === 'now_showing'
+                                                                ? 'bg-emerald-950/40 text-emerald-400'
                                                                 : movie.status === 'coming_soon'
-                                                                    ? 'Sắp chiếu'
-                                                                    : movie.status || 'Chưa rõ'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <div className="flex justify-end gap-2">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openEdit(movie)}
-                                                                title="Sửa phim"
-                                                                aria-label={`Sửa phim ${movie.title}`}
-                                                                className="rounded-lg border border-white/10 p-2 text-slate-300 transition hover:border-blue-400/30 hover:bg-blue-500/10 hover:text-blue-300"
-                                                            >
-                                                                <Pencil size={16} />
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleDelete(movie)}
-                                                                title="Xóa phim"
-                                                                aria-label={`Xóa phim ${movie.title}`}
-                                                                className="rounded-lg border border-white/10 p-2 text-slate-300 transition hover:border-red-400/30 hover:bg-red-500/10 hover:text-red-300"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                                                    ? 'bg-amber-950/40 text-amber-400'
+                                                                    : 'bg-zinc-800 text-zinc-300'
+                                                        }`}
+                                                    >
+                                                        {movie.status === 'now_showing'
+                                                            ? 'Đang chiếu'
+                                                            : movie.status === 'coming_soon'
+                                                                ? 'Sắp chiếu'
+                                                                : movie.status === 'ended' ? 'Đã kết thúc' : movie.status || 'Chưa rõ'}
+                                                    </span>
+                                                </td>
+
+                                                <td className="whitespace-nowrap px-4 py-3 text-right">
+                                                    <div className="inline-flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openEdit(movie)}
+                                                            title="Sửa phim"
+                                                            aria-label={`Sửa phim ${movie.title}`}
+                                                            className="inline-flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-200 hover:border-zinc-700 hover:bg-zinc-800 transition-colors cursor-pointer"
+                                                        >
+                                                            <Pencil size={14} />
+                                                            Sửa
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDelete(movie)}
+                                                            title="Xóa phim"
+                                                            aria-label={`Xóa phim ${movie.title}`}
+                                                            className="inline-flex items-center gap-1.5 rounded border border-red-950/60 bg-red-950/20 px-2.5 py-1 text-xs text-red-400 hover:bg-red-900/30 hover:border-red-800 transition-colors cursor-pointer"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                            Xóa
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             )}
-                        </section>
-                    </>
+                        </TableContainer>
+                    </div>
                 )}
 
                 {/* ACTORS TAB */}
                 {activeTab === 'actors' && (
-                    <>
+                    <div className="space-y-2">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                                <h2 className="text-lg font-semibold">Danh sách diễn viên</h2>
-                                <p className="mt-1 text-sm text-slate-400">
-                                    Quản lý hồ sơ diễn viên và liên kết với phim.
+                                <h2 className="text-sm font-semibold text-zinc-100">
+                                    Danh sách diễn viên
+                                </h2>
+                                <p className="mt-1 text-xs text-zinc-400">
+                                    Tổng cộng {actorTotal} diễn viên
                                 </p>
                             </div>
-                            <button
-                                type="button"
-                                onClick={openCreateActor}
-                                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold transition hover:bg-red-500"
-                            >
-                                <Plus size={17} />
-                                Thêm diễn viên
-                            </button>
-                        </div>
 
-                        <section className="overflow-hidden rounded-xl border border-white/10 bg-slate-900/70">
-                            <div className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <h3 className="font-semibold">Diễn viên trong hệ thống</h3>
-                                    <p className="mt-1 text-xs text-slate-400">
-                                        Tổng cộng {actorTotal} diễn viên
-                                    </p>
-                                </div>
-                                <div className="relative w-full sm:max-w-xs">
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                                <div className="relative w-full sm:w-64">
                                     <Search
-                                        size={16}
-                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                                        size={15}
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
                                     />
                                     <input
                                         value={actorSearch}
-                                        onChange={(event) =>
-                                            changeActorSearch(event.target.value)
-                                        }
+                                        onChange={(event) => changeActorSearch(event.target.value)}
                                         placeholder="Tìm tên diễn viên..."
-                                        className={`${inputClass} pl-9`}
+                                        className={`${inputClass} rounded-md py-2 pl-9`}
                                         aria-label="Tìm diễn viên"
                                     />
                                 </div>
-                            </div>
 
-                            {actorLoading ? (
-                                <div className="flex items-center justify-center gap-3 py-16 text-sm text-slate-400">
-                                    <Loader2 className="animate-spin" size={20} />
-                                    Đang tải diễn viên...
-                                </div>
-                            ) : actors.length === 0 ? (
-                                <div className="px-6 py-16 text-center">
-                                    <Users
-                                        size={34}
-                                        className="mx-auto mb-3 text-slate-600"
+                                <button
+                                    type="button"
+                                    onClick={openCreateActor}
+                                    className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-xs font-semibold text-white transition hover:brightness-110"
+                                >
+                                    <Plus size={15} />
+                                    Thêm diễn viên
+                                </button>
+                            </div>
+                        </div>
+
+                        <TableContainer
+                            className="h-[calc(100vh-245px)] min-h-[360px]"
+                            isLoading={actorLoading}
+                            loadingText="Đang tải danh sách diễn viên..."
+                            pagination={
+                                <Pagination
+                                    page={actorPage}
+                                    pageSize={actorPageSize}
+                                    total={actorTotal}
+                                    itemCount={actors.length}
+                                    onPageChange={setActorPage}
+                                    onPageSizeChange={(size) => {
+                                        setActorPageSize(Math.min(size, 100));
+                                        setActorPage(1);
+                                    }}
+                                    disabled={actorLoading}
+                                />
+                            }
+                        >
+                            {actors.length === 0 && !actorLoading ? (
+                                <div className="p-6">
+                                    <EmptyState
+                                        icon={Users}
+                                        title={
+                                            actorSearch
+                                                ? 'Không tìm thấy diễn viên'
+                                                : 'Chưa có diễn viên'
+                                        }
+                                        description="Thêm diễn viên mới để có thể liên kết với phim."
                                     />
-                                    <p className="font-medium text-slate-200">
-                                        {actorSearch
-                                            ? 'Không tìm thấy diễn viên'
-                                            : 'Chưa có diễn viên'}
-                                    </p>
-                                    <p className="mt-1 text-sm text-slate-500">
-                                        Thêm diễn viên mới để có thể liên kết với phim.
-                                    </p>
                                 </div>
                             ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full min-w-[600px] text-left text-sm">
-                                        <thead className="bg-slate-950/70 text-xs uppercase tracking-wide text-slate-400">
-                                            <tr>
-                                                <th className="px-4 py-3 font-medium">Diễn viên</th>
-                                                <th className="px-4 py-3 font-medium">Số phim</th>
-                                                <th className="px-4 py-3 text-right font-medium">
-                                                    Thao tác
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-white/5">
-                                            {actors.map((actor) => (
-                                                <tr
-                                                    key={actor.id}
-                                                    className="transition hover:bg-white/[0.025]"
-                                                >
-                                                    <td className="px-4 py-3">
-                                                        <div className="flex items-center gap-3">
-                                                            {actor.profilePath ? (
-                                                                <img
-                                                                    src={actor.profilePath}
-                                                                    alt=""
-                                                                    onError={(event) => {
-                                                                        event.currentTarget.onerror = null;
-                                                                        event.currentTarget.style.display = 'none';
-                                                                    }}
-                                                                    className="h-12 w-12 rounded-full border border-white/10 bg-slate-800 object-cover"
-                                                                />
-                                                            ) : (
-                                                                <div className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-slate-800 text-slate-400">
-                                                                    <UserRound size={22} />
-                                                                </div>
-                                                            )}
-                                                            <div>
-                                                                <p className="font-semibold text-slate-100">
-                                                                    {actor.name}
-                                                                </p>
-                                                                <p className="mt-1 text-xs text-slate-500">
-                                                                    {actor.id}
-                                                                </p>
+                                <table className="w-full min-w-[600px] border-collapse text-left text-xs sm:text-sm">
+                                    <thead className="sticky top-0 z-10 select-none border-b border-zinc-800 bg-zinc-900 shadow-sm shadow-black/50">
+                                        <tr className="text-xs font-semibold text-zinc-300">
+                                            <th className="bg-zinc-900 px-4 py-3">Diễn viên</th>
+                                            <th className="bg-zinc-900 px-4 py-3">Số phim</th>
+                                            <th className="bg-zinc-900 px-4 py-3 text-right">Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-zinc-800/60">
+                                        {actors.map((actor) => (
+                                            <tr
+                                                key={actor.id}
+                                                className="transition-colors hover:bg-zinc-900/50"
+                                            >
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-3">
+                                                        {actor.profilePath ? (
+                                                            <img
+                                                                src={actor.profilePath}
+                                                                alt=""
+                                                                onError={(event) => {
+                                                                    event.currentTarget.onerror = null;
+                                                                    event.currentTarget.style.display = 'none';
+                                                                }}
+                                                                className="h-12 w-12 rounded-full border border-zinc-800 bg-zinc-800 object-cover"
+                                                            />
+                                                        ) : (
+                                                            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-zinc-800 bg-zinc-800 text-zinc-400">
+                                                                <UserRound size={22} />
                                                             </div>
+                                                        )}
+                                                        <div className="min-w-0">
+                                                            <p className="font-medium text-zinc-100">
+                                                                {actor.name}
+                                                            </p>
+                                                            <p className="mt-1 truncate text-xs text-zinc-400">
+                                                                Mã: <span className="font-mono">{actor.id}</span>
+                                                            </p>
                                                         </div>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-slate-300">
-                                                        {actor.moviesCount ?? 0} phim
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <div className="flex justify-end gap-2">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openEditActor(actor)}
-                                                                title="Sửa diễn viên"
-                                                                aria-label={`Sửa diễn viên ${actor.name}`}
-                                                                className="rounded-lg border border-white/10 p-2 text-slate-300 transition hover:border-blue-400/30 hover:bg-blue-500/10 hover:text-blue-300"
-                                                            >
-                                                                <Pencil size={16} />
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleDeleteActor(actor)}
-                                                                title="Xóa diễn viên"
-                                                                aria-label={`Xóa diễn viên ${actor.name}`}
-                                                                className="rounded-lg border border-white/10 p-2 text-slate-300 transition hover:border-red-400/30 hover:bg-red-500/10 hover:text-red-300"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
+                                                    </div>
+                                                </td>
 
-                            {/* Actor pagination */}
-                            {!actorLoading && actorTotal > 0 && (
-                                <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <p className="text-xs text-slate-400">
-                                        Trang {actorPage}/{actorTotalPages} · Hiển thị{' '}
-                                        {Math.min((actorPage - 1) * actorPageSize + 1, actorTotal)}
-                                        –
-                                        {Math.min(actorPage * actorPageSize, actorTotal)} trong{' '}
-                                        {actorTotal} diễn viên
-                                    </p>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={actorPage <= 1}
-                                            onClick={() =>
-                                                setActorPage((page) => Math.max(1, page - 1))
-                                            }
-                                            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-                                        >
-                                            <ChevronLeft size={15} />
-                                            Trước
-                                        </button>
-                                        <button
-                                            type="button"
-                                            disabled={actorPage >= actorTotalPages}
-                                            onClick={() =>
-                                                setActorPage((page) =>
-                                                    Math.min(actorTotalPages, page + 1)
-                                                )
-                                            }
-                                            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-                                        >
-                                            Sau
-                                            <ChevronRight size={15} />
-                                        </button>
-                                    </div>
-                                </div>
+                                                <td className="px-4 py-3 font-mono text-zinc-200">
+                                                    {actor.moviesCount ?? 0} phim
+                                                </td>
+
+                                                <td className="whitespace-nowrap px-4 py-3 text-right">
+                                                    <div className="inline-flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openEditActor(actor)}
+                                                            title="Sửa diễn viên"
+                                                            aria-label={`Sửa diễn viên ${actor.name}`}
+                                                            className="inline-flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-200 hover:border-zinc-700 hover:bg-zinc-800 transition-colors cursor-pointer"
+                                                        >
+                                                            <Pencil size={14} />
+                                                            Sửa
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteActor(actor)}
+                                                            title="Xóa diễn viên"
+                                                            aria-label={`Xóa diễn viên ${actor.name}`}
+                                                            className="inline-flex items-center gap-1.5 rounded border border-red-950/60 bg-red-950/20 px-2.5 py-1 text-xs text-red-400 hover:bg-red-900/30 hover:border-red-800 transition-colors cursor-pointer"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                            Xóa
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             )}
-                        </section>
-                    </>
+                        </TableContainer>
+                    </div>
                 )}
             </div>
 
@@ -893,13 +898,13 @@ const AdminMovies = () => {
                         }
                     }}
                 >
-                    <section className="my-4 w-full max-w-3xl overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
-                        <header className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+                    <section className="my-4 w-full max-w-3xl overflow-hidden rounded-2xl border border-zinc-800 bg-slate-900 shadow-2xl">
+                        <header className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
                             <div>
                                 <h2 className="text-lg font-bold">
                                     {editingId ? 'Chỉnh sửa phim' : 'Thêm phim mới'}
                                 </h2>
-                                <p className="mt-1 text-xs text-slate-400">
+                                <p className="mt-1 text-xs text-zinc-400">
                                     Các trường có dấu * là bắt buộc.
                                 </p>
                             </div>
@@ -907,7 +912,7 @@ const AdminMovies = () => {
                                 type="button"
                                 disabled={saving}
                                 onClick={() => setModalOpen(false)}
-                                className="rounded-lg p-2 text-slate-400 hover:bg-white/5 hover:text-white"
+                                className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
                                 aria-label="Đóng biểu mẫu"
                             >
                                 <X size={20} />
@@ -1114,7 +1119,7 @@ const AdminMovies = () => {
                                                 key={genre.id}
                                                 className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition ${form.genreIds.includes(genre.id)
                                                         ? 'border-red-500/50 bg-red-500/10 text-red-200'
-                                                        : 'border-white/10 bg-slate-950 text-slate-300 hover:bg-white/5'
+                                                        : 'border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-800'
                                                     }`}
                                             >
                                                 <input
@@ -1131,13 +1136,13 @@ const AdminMovies = () => {
                             </div>
 
                             {/* Actors in movie */}
-                            <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                            <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
                                         <p className="font-semibold text-white">
                                             Diễn viên tham gia
                                         </p>
-                                        <p className="mt-1 text-xs text-slate-400">
+                                        <p className="mt-1 text-xs text-zinc-400">
                                             Chọn diễn viên và nhập tên nhân vật trong phim.
                                         </p>
                                     </div>
@@ -1185,7 +1190,7 @@ const AdminMovies = () => {
                                             return (
                                                 <div
                                                     key={item.actorId}
-                                                    className="flex flex-col gap-2 rounded-lg border border-white/10 bg-slate-900 p-3 sm:flex-row sm:items-center"
+                                                    className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-slate-900 p-3 sm:flex-row sm:items-center"
                                                 >
                                                     <div className="min-w-0 flex-1">
                                                         <p className="mb-1 text-sm font-medium text-slate-200">
@@ -1208,7 +1213,7 @@ const AdminMovies = () => {
                                                         type="button"
                                                         onClick={() => removeMovieActor(item.actorId)}
                                                         title="Gỡ diễn viên khỏi phim"
-                                                        className="self-end rounded-lg border border-red-500/20 p-2 text-red-300 transition hover:bg-red-500/10 sm:self-center"
+                                                        className="self-end rounded-lg border border-red-500/20 p-2 text-red-300 transition hover:brightness-110/10 sm:self-center"
                                                     >
                                                         <Trash2 size={16} />
                                                     </button>
@@ -1217,25 +1222,25 @@ const AdminMovies = () => {
                                         })}
                                     </div>
                                 ) : (
-                                    <p className="rounded-lg border border-dashed border-white/10 py-5 text-center text-xs text-slate-500">
+                                    <p className="rounded-lg border border-dashed border-zinc-800 py-5 text-center text-xs text-zinc-500">
                                         Chưa chọn diễn viên cho phim này.
                                     </p>
                                 )}
                             </div>
 
-                            <div className="flex flex-col-reverse gap-2 border-t border-white/10 pt-4 sm:flex-row sm:justify-end">
+                            <div className="flex flex-col-reverse gap-2 border-t border-zinc-800 pt-4 sm:flex-row sm:justify-end">
                                 <button
                                     type="button"
                                     disabled={saving}
                                     onClick={() => setModalOpen(false)}
-                                    className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 disabled:opacity-50"
+                                    className="rounded-lg border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
                                 >
                                     Hủy
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={saving}
-                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     {saving && (
                                         <Loader2 size={16} className="animate-spin" />
@@ -1265,13 +1270,13 @@ const AdminMovies = () => {
                         }
                     }}
                 >
-                    <section className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
-                        <header className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+                    <section className="w-full max-w-lg overflow-hidden rounded-2xl border border-zinc-800 bg-slate-900 shadow-2xl">
+                        <header className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
                             <div>
                                 <h2 className="text-lg font-bold">
                                     {editingActorId ? 'Chỉnh sửa diễn viên' : 'Thêm diễn viên'}
                                 </h2>
-                                <p className="mt-1 text-xs text-slate-400">
+                                <p className="mt-1 text-xs text-zinc-400">
                                     Nhập thông tin hồ sơ diễn viên.
                                 </p>
                             </div>
@@ -1279,7 +1284,7 @@ const AdminMovies = () => {
                                 type="button"
                                 disabled={actorSaving}
                                 onClick={() => setActorModalOpen(false)}
-                                className="rounded-lg p-2 text-slate-400 hover:bg-white/5 hover:text-white"
+                                className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
                                 aria-label="Đóng biểu mẫu diễn viên"
                             >
                                 <X size={20} />
@@ -1336,7 +1341,7 @@ const AdminMovies = () => {
                             </div>
 
                             {actorForm.profilePath && (
-                                <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-slate-950 p-3">
+                                <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
                                     <img
                                         src={actorForm.profilePath}
                                         alt="Xem trước ảnh diễn viên"
@@ -1345,25 +1350,25 @@ const AdminMovies = () => {
                                         }}
                                         className="h-14 w-14 rounded-full object-cover"
                                     />
-                                    <p className="text-xs text-slate-400">
+                                    <p className="text-xs text-zinc-400">
                                         Xem trước ảnh đại diện
                                     </p>
                                 </div>
                             )}
 
-                            <div className="flex flex-col-reverse gap-2 border-t border-white/10 pt-4 sm:flex-row sm:justify-end">
+                            <div className="flex flex-col-reverse gap-2 border-t border-zinc-800 pt-4 sm:flex-row sm:justify-end">
                                 <button
                                     type="button"
                                     disabled={actorSaving}
                                     onClick={() => setActorModalOpen(false)}
-                                    className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5"
+                                    className="rounded-lg border border-zinc-800 px-4 py-2.5 text-sm text-zinc-300 hover:bg-zinc-800"
                                 >
                                     Hủy
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={actorSaving}
-                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold hover:bg-red-500 disabled:opacity-50"
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold hover:brightness-110 disabled:opacity-50"
                                 >
                                     {actorSaving ? (
                                         <Loader2 size={16} className="animate-spin" />
